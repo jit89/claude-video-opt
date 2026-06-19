@@ -16,7 +16,10 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from download import download, is_url  # noqa: E402
-from frames import MAX_FPS, auto_fps, auto_fps_focus, extract, format_time, get_metadata, parse_time  # noqa: E402
+from frames import (  # noqa: E402
+    MAX_FPS, auto_fps, auto_fps_focus, extract, extract_scene_change,
+    format_time, get_metadata, parse_time,
+)
 from transcribe import filter_range, format_transcript, parse_vtt  # noqa: E402
 from whisper import load_api_key, transcribe_video  # noqa: E402
 
@@ -43,6 +46,11 @@ def main() -> int:
         choices=["groq", "openai"],
         default=None,
         help="Force a specific Whisper backend. Default: prefer Groq, fall back to OpenAI.",
+    )
+    ap.add_argument(
+        "--no-scene-change",
+        action="store_true",
+        help="Force uniform frame sampling (skip scene-change detection).",
     )
     args = ap.parse_args()
 
@@ -92,17 +100,36 @@ def main() -> int:
         f"{format_time(effective_start)}-{format_time(effective_end)} ({effective_duration:.1f}s)"
         if focused else f"full {effective_duration:.1f}s"
     )
-    print(f"[watch] extracting ~{target} frames at {fps:.3f} fps over {scope}…", file=sys.stderr)
-
-    frames = extract(
-        video_path,
-        work / "frames",
-        fps=fps,
-        resolution=args.resolution,
-        max_frames=max_frames,
-        start_seconds=start_sec,
-        end_seconds=end_sec,
-    )
+    # Scene-change sampling (one frame per shot) is the default for full-video
+    # passes. Focused mode and an explicit --fps both want uniform sampling.
+    use_scene = (not args.no_scene_change) and not focused and args.fps is None
+    if use_scene:
+        print(f"[watch] extracting scene-change frames (one per shot) over {scope}…", file=sys.stderr)
+        frames = extract_scene_change(
+            video_path,
+            work / "frames",
+            scene_threshold=0.3,
+            resolution=args.resolution,
+            max_frames=max_frames,
+            uniform_fallback_min=10,
+            start_seconds=start_sec,
+            end_seconds=end_sec,
+        )
+        if frames and frames[0].get("source") == "scene-change":
+            print(f"[watch] {len(frames)} scene-change frames extracted", file=sys.stderr)
+        else:
+            print("[watch] few scenes detected — fell back to uniform sampling", file=sys.stderr)
+    else:
+        print(f"[watch] extracting ~{target} frames at {fps:.3f} fps over {scope}…", file=sys.stderr)
+        frames = extract(
+            video_path,
+            work / "frames",
+            fps=fps,
+            resolution=args.resolution,
+            max_frames=max_frames,
+            start_seconds=start_sec,
+            end_seconds=end_sec,
+        )
 
     transcript_segments: list[dict] = []
     transcript_text: str | None = None
@@ -161,8 +188,12 @@ def main() -> int:
         )
     if meta.get("width") and meta.get("height"):
         print(f"- **Resolution:** {meta['width']}x{meta['height']} ({meta.get('codec') or 'unknown codec'})")
-    mode = "focused" if focused else "full"
-    print(f"- **Frames:** {len(frames)} @ {fps:.3f} fps, {mode} mode (budget {target}, max {max_frames})")
+    scene_sampled = bool(frames) and frames[0].get("source") == "scene-change"
+    if scene_sampled:
+        print(f"- **Frames:** {len(frames)} scene-change (one per shot, max {max_frames})")
+    else:
+        mode = "focused" if focused else "full"
+        print(f"- **Frames:** {len(frames)} @ {fps:.3f} fps, {mode} mode (budget {target}, max {max_frames})")
     print(f"- **Frame size:** {args.resolution}px wide")
     if transcript_segments:
         in_range = " in range" if focused else ""

@@ -147,7 +147,8 @@ Other knobs (passed to `scripts/watch.py`):
 
 - `--max-frames N` — lower the frame cap for a tighter token budget.
 - `--resolution W` — bump frame width to 1024 px when Claude needs to read on-screen text (slides, terminals, code).
-- `--fps F` — override the auto-fps calculation (still capped at 2 fps).
+- `--fps F` — override the auto-fps calculation (still capped at 2 fps). Forces uniform sampling.
+- `--no-scene-change` — force uniform every-N-seconds sampling instead of scene-change detection.
 - `--whisper groq|openai` — force a specific Whisper backend.
 - `--no-whisper` — disable transcription entirely; frames only.
 - `--out-dir DIR` — keep working files somewhere specific (default: auto-generated tmp dir).

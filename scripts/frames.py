@@ -185,6 +185,112 @@ def extract(
     ]
 
 
+def extract_scene_change(
+    video_path: str,
+    out_dir: Path,
+    scene_threshold: float = 0.3,
+    resolution: int = 512,
+    max_frames: int = 100,
+    uniform_fallback_min: int = 10,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+) -> list[dict]:
+    """One frame per detected shot. Falls back to uniform sampling when too few scenes.
+
+    Uses ffmpeg's `select='gt(scene,T)'` filter — scene change scores in [0,1],
+    higher = more visual difference between frames. 0.3 is a permissive cut
+    detector that catches hard cuts and most dissolves without firing on motion.
+
+    Always emits the first frame of the range (scene filter only fires on
+    *changes*, so without this you'd miss the opening shot).
+
+    On `uniform_fallback_min`: static or near-static videos (screen recordings,
+    long talking heads) yield very few scene changes. Fall back to uniform
+    sampling — sparse frames > almost no frames.
+    """
+    if shutil.which("ffmpeg") is None:
+        raise SystemExit("ffmpeg is not installed. Install with: brew install ffmpeg")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for existing in out_dir.glob("frame_*.jpg"):
+        existing.unlink()
+
+    # Build a select expression that emits frame 0 + every scene-change frame.
+    select_expr = f"eq(n\\,0)+gt(scene\\,{scene_threshold})"
+    vf = f"select='{select_expr}',metadata=mode=print:file=-,scale={resolution}:-2"
+
+    output_pattern = str(out_dir / "frame_%04d.jpg")
+    cmd: list[str] = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+    ]
+    if start_seconds is not None:
+        cmd += ["-ss", f"{start_seconds:.3f}"]
+    if end_seconds is not None:
+        cmd += ["-to", f"{end_seconds:.3f}"]
+    cmd += [
+        "-i", str(Path(video_path).resolve()),
+        "-vf", vf,
+        "-vsync", "vfr",
+        "-frames:v", str(max_frames),
+        "-q:v", "4",
+        output_pattern,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise SystemExit(f"ffmpeg scene-change extraction failed: {result.stderr.strip()}")
+
+    # Parse pts_time lines from stdout/stderr (ffmpeg version variance).
+    pts_times: list[float] = []
+    for stream in (result.stdout, result.stderr):
+        for line in stream.splitlines():
+            line = line.strip()
+            if "pts_time" in line:
+                for tok in line.split():
+                    if tok.startswith("pts_time:"):
+                        try:
+                            pts_times.append(float(tok.split(":", 1)[1]))
+                        except ValueError:
+                            pass
+                    elif tok.startswith("pts_time="):
+                        try:
+                            pts_times.append(float(tok.split("=", 1)[1]))
+                        except ValueError:
+                            pass
+
+    frames = sorted(out_dir.glob("frame_*.jpg"))
+
+    # Fallback: too few scene frames means this video is static-ish.
+    if len(frames) < uniform_fallback_min:
+        for f in frames:
+            f.unlink()
+        meta = get_metadata(video_path)
+        full_duration = meta["duration_seconds"]
+        eff_start = start_seconds if start_seconds is not None else 0.0
+        eff_end = end_seconds if end_seconds is not None else full_duration
+        eff_duration = max(0.1, eff_end - eff_start)
+        fps, _ = auto_fps(eff_duration, max_frames=max_frames)
+        return extract(
+            video_path, out_dir,
+            fps=fps, resolution=resolution, max_frames=max_frames,
+            start_seconds=start_seconds, end_seconds=end_seconds,
+        )
+
+    offset = start_seconds or 0.0
+    if len(pts_times) < len(frames):
+        pts_times += [0.0] * (len(frames) - len(pts_times))
+
+    return [
+        {
+            "index": i,
+            "timestamp_seconds": round(offset + pts_times[i], 2),
+            "path": str(p),
+            "source": "scene-change",
+        }
+        for i, p in enumerate(frames)
+    ]
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print(

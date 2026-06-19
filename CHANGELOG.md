@@ -2,6 +2,15 @@
 
 All notable changes to `/watch` are documented here.
 
+## [Unreleased]
+
+### Added
+- Scene-change frame extraction in `scripts/frames.py` — `extract_scene_change()` uses ffmpeg's `select=gt(scene,0.3)` filter to emit one frame per detected shot instead of uniform every-N-seconds sampling, keeping token cost flat on long videos. Always emits frame 0 (the scene filter only fires on *changes*). Falls back to uniform sampling when fewer than 10 scenes are detected (static/screen-recorded sources). Adapted from [taoufik123-collab/claude-watch](https://github.com/taoufik123-collab/claude-watch) v0.2.0.
+- `--no-scene-change` flag on `scripts/watch.py` to force uniform sampling.
+
+### Changed
+- Full-video passes now default to scene-change sampling. Focused mode (`--start`/`--end`) and an explicit `--fps` still use uniform sampling.
+
 ## [0.1.3] — 2026-05-09
 
 ### Fixed

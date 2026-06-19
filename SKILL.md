@@ -79,7 +79,8 @@ Optional flags:
 - `--start T` / `--end T` — focus on a section. Accepts `SS`, `MM:SS`, or `HH:MM:SS`. When either is set, fps auto-scales denser (see "Focusing on a section" below).
 - `--max-frames N` — lower the cap for tighter token budget (e.g. `--max-frames 40`)
 - `--resolution W` — change frame width in px (default 512; bump to 1024 only if the user needs to read on-screen text)
-- `--fps F` — override auto-fps (clamped to 2 fps max)
+- `--fps F` — override auto-fps (clamped to 2 fps max); forces uniform sampling
+- `--no-scene-change` — force uniform every-N-seconds sampling instead of scene-change detection
 - `--out-dir DIR` — keep working files somewhere specific (default: an auto-generated tmp dir)
 - `--whisper groq|openai` — force a specific Whisper backend (default: prefer Groq if both keys exist)
 - `--no-whisper` — disable the Whisper fallback entirely (frames-only if no captions)
