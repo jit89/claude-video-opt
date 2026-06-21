@@ -79,7 +79,7 @@ pipeline in ${REPO_DIR}.
 
 1. Run the watcher to download the video, extract one frame per shot, and pull
    the transcript:
-     python3 ${REPO_DIR}/scripts/watch.py "${SOURCE}" ${EXTRA[*]}
+     python3 ${REPO_DIR}/scripts/watch.py "${SOURCE}" ${EXTRA[*]:-}
    It prints a markdown report: a "## Frames" list of frame file paths
    (chronological, each tagged with its absolute timestamp) and a
    "## Timeline" that interleaves those frames with the transcript in time order.
