@@ -52,6 +52,11 @@ def main() -> int:
         action="store_true",
         help="Force uniform frame sampling (skip scene-change detection).",
     )
+    ap.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Re-download even if the URL is already in the on-disk cache.",
+    )
     args = ap.parse_args()
 
     max_frames = min(args.max_frames, 100)
@@ -67,7 +72,7 @@ def main() -> int:
         "[watch] downloading via yt-dlp…" if is_url(args.source) else "[watch] using local file…",
         file=sys.stderr,
     )
-    dl = download(args.source, work / "download")
+    dl = download(args.source, work / "download", use_cache=not args.no_cache)
     video_path = dl["video_path"]
 
     meta = get_metadata(video_path)
@@ -227,20 +232,36 @@ def main() -> int:
         print(f"- `{frame['path']}` (t={format_time(frame['timestamp_seconds'])})")
 
     print()
-    print("## Transcript")
+    print("## Timeline (frames + transcript, time-aligned)")
     print()
-    if transcript_text:
+    if transcript_segments:
         label = transcript_source or "captions"
-        if focused:
-            print(f"_Source: {label}. Filtered to {format_time(effective_start)} → {format_time(effective_end)}:_")
-        else:
-            print(f"_Source: {label}._")
+        rng = (
+            f" Filtered to {format_time(effective_start)} → {format_time(effective_end)}."
+            if focused else ""
+        )
+        print(
+            f"_Frames (`F`) and transcript lines (`»`) merged in chronological order, so you can "
+            f"see what's on screen as each line is spoken. Frame source: {label}.{rng}_"
+        )
         print()
+        # (timestamp, kind, body); kind 0=frame sorts before kind 1=text at the
+        # same timestamp, so the frame is shown just before the words over it.
+        events: list[tuple[float, int, str]] = []
+        for fr in frames:
+            events.append((fr["timestamp_seconds"], 0, f"F  {Path(fr['path']).name}"))
+        for seg in transcript_segments:
+            events.append((seg["start"], 1, "»  " + seg["text"].strip()))
+        events.sort(key=lambda e: (e[0], e[1]))
         print("```")
-        print(transcript_text)
+        for t, _, body in events:
+            print(f"[{format_time(t)}] {body}")
         print("```")
     elif focused and dl.get("subtitle_path"):
-        print(f"_No transcript lines fell inside {format_time(effective_start)} → {format_time(effective_end)}._")
+        print(
+            f"_No transcript lines fell inside {format_time(effective_start)} → "
+            f"{format_time(effective_end)}. Frames listed above._"
+        )
     else:
         setup_py = SCRIPT_DIR / "setup.py"
         print(

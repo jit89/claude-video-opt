@@ -17,6 +17,25 @@ from pathlib import Path
 
 MAX_FPS = 2.0
 
+# Ceiling on how many scene-change frames ffmpeg may emit in one pass. The
+# detected scenes are then thinned evenly down to the caller's max_frames. A
+# generous cap keeps adversarial strobe content from writing unbounded frames
+# while still capturing the whole timeline of any realistic video.
+SCENE_DETECT_HARD_CAP = 1000
+
+
+def _even_indices(n: int, k: int) -> list[int]:
+    """Pick k indices spread evenly across range(n), always including 0 and n-1.
+
+    Rounding collisions can yield slightly fewer than k indices; that's fine —
+    we'd rather come in a hair under budget than double-count a frame.
+    """
+    if k >= n:
+        return list(range(n))
+    if k <= 1:
+        return [0]
+    return sorted({round(i * (n - 1) / (k - 1)) for i in range(k)})
+
 
 def _clamp_fps(fps: float, duration_seconds: float, max_frames: int) -> tuple[float, int]:
     fps = min(fps, MAX_FPS)
@@ -231,7 +250,7 @@ def extract_scene_change(
         "-i", str(Path(video_path).resolve()),
         "-vf", vf,
         "-vsync", "vfr",
-        "-frames:v", str(max_frames),
+        "-frames:v", str(SCENE_DETECT_HARD_CAP),
         "-q:v", "4",
         output_pattern,
     ]
@@ -279,6 +298,18 @@ def extract_scene_change(
     offset = start_seconds or 0.0
     if len(pts_times) < len(frames):
         pts_times += [0.0] * (len(frames) - len(pts_times))
+
+    # Thin evenly across the FULL timeline. ffmpeg emits scene frames in
+    # chronological order, so a naive head-truncation to max_frames would drop
+    # the entire back half of a long, cut-heavy video. Spread the budget across
+    # the whole runtime instead, and delete the frames we're discarding.
+    if len(frames) > max_frames:
+        keep = set(_even_indices(len(frames), max_frames))
+        for i, p in enumerate(frames):
+            if i not in keep:
+                p.unlink(missing_ok=True)
+        frames = [p for i, p in enumerate(frames) if i in keep]
+        pts_times = [t for i, t in enumerate(pts_times) if i in keep]
 
     return [
         {

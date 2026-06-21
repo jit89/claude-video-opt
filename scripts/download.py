@@ -6,7 +6,9 @@ transcribe.py can parse them without needing Whisper.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -15,6 +17,23 @@ from urllib.parse import urlparse
 
 
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".flv", ".wmv"}
+
+# Sentinel written into a cache dir once a download finishes cleanly. We only
+# treat a cache entry as a hit when this exists, so an interrupted/partial
+# download is never served from cache.
+CACHE_COMPLETE_MARKER = ".complete"
+
+
+def _cache_root() -> Path:
+    override = os.environ.get("WATCH_CACHE_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".cache" / "watch" / "downloads"
+
+
+def _cache_dir_for(url: str) -> Path:
+    key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    return _cache_root() / key
 
 
 def is_url(source: str) -> bool:
@@ -59,7 +78,45 @@ def _pick_video(out_dir: Path) -> Path | None:
     return None
 
 
-def download_url(url: str, out_dir: Path) -> dict:
+def _result_from_dir(out_dir: Path, url: str) -> dict:
+    """Build the download result dict from files already on disk in out_dir."""
+    video = _pick_video(out_dir)
+    subtitle = _pick_subtitle(out_dir)
+    info_path = out_dir / "video.info.json"
+    info: dict = {}
+    if info_path.exists():
+        try:
+            raw = json.loads(info_path.read_text(encoding="utf-8"))
+            info = {
+                "title": raw.get("title"),
+                "uploader": raw.get("uploader") or raw.get("channel"),
+                "duration": raw.get("duration"),
+                "url": raw.get("webpage_url") or url,
+            }
+        except Exception as exc:
+            print(f"[watch] info.json parse failed: {exc}", file=sys.stderr)
+            info = {"url": url}
+
+    return {
+        "video_path": str(video) if video else None,
+        "subtitle_path": str(subtitle) if subtitle else None,
+        "info": info or {"url": url},
+        "downloaded": True,
+    }
+
+
+def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
+    # Check the cache before anything else — a cache hit must not require yt-dlp
+    # to be installed, since the whole point is to skip the download.
+    cache_dir: Path | None = None
+    if use_cache:
+        cache_dir = _cache_dir_for(url)
+        if (cache_dir / CACHE_COMPLETE_MARKER).exists() and _pick_video(cache_dir):
+            print(f"[watch] cache hit — reusing {cache_dir}", file=sys.stderr)
+            return _result_from_dir(cache_dir, url)
+        # Download straight into the cache location so it persists for next time.
+        out_dir = cache_dir
+
     if shutil.which("yt-dlp") is None:
         raise SystemExit("yt-dlp is not installed. Install with: brew install yt-dlp")
 
@@ -93,33 +150,17 @@ def download_url(url: str, out_dir: Path) -> dict:
             f"yt-dlp did not produce a video file in {out_dir} (exit {result.returncode})"
         )
 
-    subtitle = _pick_subtitle(out_dir)
-    info_path = out_dir / "video.info.json"
-    info: dict = {}
-    if info_path.exists():
-        try:
-            raw = json.loads(info_path.read_text(encoding="utf-8"))
-            info = {
-                "title": raw.get("title"),
-                "uploader": raw.get("uploader") or raw.get("channel"),
-                "duration": raw.get("duration"),
-                "url": raw.get("webpage_url") or url,
-            }
-        except Exception as exc:
-            print(f"[watch] info.json parse failed: {exc}", file=sys.stderr)
-            info = {"url": url}
+    # Mark the cache entry complete only after a video file is confirmed present,
+    # so a partial download is never served on a later run.
+    if cache_dir is not None:
+        (cache_dir / CACHE_COMPLETE_MARKER).write_text("ok", encoding="utf-8")
 
-    return {
-        "video_path": str(video),
-        "subtitle_path": str(subtitle) if subtitle else None,
-        "info": info or {"url": url},
-        "downloaded": True,
-    }
+    return _result_from_dir(out_dir, url)
 
 
-def download(source: str, out_dir: Path) -> dict:
+def download(source: str, out_dir: Path, use_cache: bool = True) -> dict:
     if is_url(source):
-        return download_url(source, out_dir)
+        return download_url(source, out_dir, use_cache=use_cache)
     return resolve_local(source)
 
 

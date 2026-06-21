@@ -8,8 +8,14 @@ All notable changes to `/watch` are documented here.
 - Scene-change frame extraction in `scripts/frames.py` — `extract_scene_change()` uses ffmpeg's `select=gt(scene,0.3)` filter to emit one frame per detected shot instead of uniform every-N-seconds sampling, keeping token cost flat on long videos. Always emits frame 0 (the scene filter only fires on *changes*). Falls back to uniform sampling when fewer than 10 scenes are detected (static/screen-recorded sources). Adapted from [taoufik123-collab/claude-watch](https://github.com/taoufik123-collab/claude-watch) v0.2.0.
 - `--no-scene-change` flag on `scripts/watch.py` to force uniform sampling.
 
+- On-disk download cache in `scripts/download.py` — URL downloads are keyed by a SHA-256 hash of the URL and reused on later runs (video + subtitles + info.json). Cache root is `~/.cache/watch/downloads` or `$WATCH_CACHE_DIR`. A `.complete` sentinel guards against serving partial downloads, and cache hits no longer require yt-dlp to be installed. `--no-cache` forces a re-download.
+- Time-aligned `## Timeline` section in the report — frames and transcript lines are merged in chronological order so the model can see what's on screen as each line is spoken. Replaces the standalone transcript block; the `## Frames` path list (for the Read tool) is unchanged.
+
 ### Changed
 - Full-video passes now default to scene-change sampling. Focused mode (`--start`/`--end`) and an explicit `--fps` still use uniform sampling.
+
+### Fixed
+- Scene-change extraction no longer truncates long, cut-heavy videos to just their opening. ffmpeg emits detected scenes chronologically; the frame budget is now spread *evenly across the whole timeline* (always keeping the first and last) instead of head-capping at `max_frames`. Extraction is bounded by a generous internal hard cap (`SCENE_DETECT_HARD_CAP`).
 
 ## [0.1.3] — 2026-05-09
 
