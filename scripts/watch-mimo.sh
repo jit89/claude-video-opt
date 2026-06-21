@@ -23,6 +23,11 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$HOME/.config/watch/.env"
 
+# Where the agent writes its report. Default to the caller's working directory
+# (the plugin/repo dir may be read-only when installed). Override with
+# WATCH_ANALYSIS_OUT.
+OUT_FILE="${WATCH_ANALYSIS_OUT:-$PWD/watch-analysis.md}"
+
 SOURCE="${1:?usage: watch-mimo.sh <url-or-path> [question] [-- extra watch.py flags]}"
 shift || true
 
@@ -83,7 +88,7 @@ pipeline in ${REPO_DIR}.
 3. Reason over the frames AND the transcript (use your thinking). Then answer:
      ${QUESTION}
    Cite timestamps for your claims. Write the final analysis to
-   ${REPO_DIR}/watch-analysis.md and print its path as your last line.
+   ${OUT_FILE} and print its path as your last line.
 EOF
 
 # Resolve the REAL claude binary. The interactive shell may define a `claude`

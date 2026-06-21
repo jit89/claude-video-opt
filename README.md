@@ -162,6 +162,8 @@ Other knobs (passed to `scripts/watch.py`):
 ./scripts/watch-mimo.sh "<url-or-path>" "your question" -- --start 1:00 --end 2:00
 ```
 
+Installed as a plugin, the same flow is a slash command — **`/watch-mimo <url-or-path> [question]`** — which runs the launcher and surfaces the generated report. The report is written to the current directory as `watch-analysis.md` (override with `$WATCH_ANALYSIS_OUT`).
+
 Config lives in `~/.config/watch/.env`:
 
 - `MIMO_API_KEY` — `tp-…` (Token Plan) or `sk-…` (pay-as-you-go). **Required.**
