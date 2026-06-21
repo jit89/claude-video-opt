@@ -288,7 +288,12 @@ def extract_scene_change(
         eff_start = start_seconds if start_seconds is not None else 0.0
         eff_end = end_seconds if end_seconds is not None else full_duration
         eff_duration = max(0.1, eff_end - eff_start)
-        fps, _ = auto_fps(eff_duration, max_frames=max_frames)
+        # A range means we're zoomed in (e.g. a windowed long-video pass) — use
+        # the denser focused budget so a low-cut window still gets dense frames.
+        if start_seconds is not None or end_seconds is not None:
+            fps, _ = auto_fps_focus(eff_duration, max_frames=max_frames)
+        else:
+            fps, _ = auto_fps(eff_duration, max_frames=max_frames)
         return extract(
             video_path, out_dir,
             fps=fps, resolution=resolution, max_frames=max_frames,

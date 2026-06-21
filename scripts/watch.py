@@ -7,6 +7,7 @@ then Reads each frame path to see the video.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -53,9 +54,21 @@ def main() -> int:
         help="Force uniform frame sampling (skip scene-change detection).",
     )
     ap.add_argument(
+        "--scene-change",
+        action="store_true",
+        help="Force scene-change sampling even inside a focused --start/--end range "
+             "(used for windowed passes over long videos).",
+    )
+    ap.add_argument(
         "--no-cache",
         action="store_true",
         help="Re-download even if the URL is already in the on-disk cache.",
+    )
+    ap.add_argument(
+        "--probe",
+        action="store_true",
+        help="Download (cached) and print {duration_seconds, title} as JSON, then exit. "
+             "No frame extraction — used to plan windowed passes over long videos.",
     )
     args = ap.parse_args()
 
@@ -77,6 +90,14 @@ def main() -> int:
 
     meta = get_metadata(video_path)
     full_duration = meta["duration_seconds"]
+
+    if args.probe:
+        info = dl.get("info") or {}
+        print(json.dumps({
+            "duration_seconds": round(full_duration, 2),
+            "title": info.get("title"),
+        }))
+        return 0
 
     start_sec = parse_time(args.start)
     end_sec = parse_time(args.end)
@@ -107,7 +128,11 @@ def main() -> int:
     )
     # Scene-change sampling (one frame per shot) is the default for full-video
     # passes. Focused mode and an explicit --fps both want uniform sampling.
-    use_scene = (not args.no_scene_change) and not focused and args.fps is None
+    use_scene = (
+        (not args.no_scene_change)
+        and args.fps is None
+        and (args.scene_change or not focused)
+    )
     if use_scene:
         print(f"[watch] extracting scene-change frames (one per shot) over {scope}…", file=sys.stderr)
         frames = extract_scene_change(

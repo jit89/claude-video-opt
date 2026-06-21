@@ -18,10 +18,11 @@ Steps:
    ```
    If `MISSING`, tell the user to add their MiMo credentials to `~/.config/watch/.env` — `MIMO_API_KEY` (`tp-…` for a Token Plan, `sk-…` for pay-as-you-go) and, for a Token Plan, the dedicated `MIMO_BASE_URL` from their console — then stop.
 
-3. **Run the harness.** This is a longer-running delegation (it downloads, extracts scene-change frames, and runs the MiMo agent loop). Pass `--resolution 1024` so on-screen code/text is legible to MiMo, and forward any extra `watch.py` flags (e.g. `--start`/`--end`) after the `--`:
+3. **Run the harness.** This is a longer-running delegation (it downloads, extracts frames, and runs the MiMo agent loop). Pass `--resolution 1024` so on-screen code/text is legible to MiMo, and forward any extra `watch.py` flags (e.g. `--start`/`--end`) after the `--`. Add `--cleanup` (before the `--`) if the user wants the extracted frames removed afterward:
    ```bash
-   "${CLAUDE_SKILL_DIR}/scripts/watch-mimo.sh" "<source>" "<question>" -- --resolution 1024
+   "${CLAUDE_SKILL_DIR}/scripts/watch-mimo.sh" "<source>" "<question>" [--cleanup] -- --resolution 1024
    ```
+   Long videos (> 10 min) are automatically processed in 10-minute **windows** — each window gets its own dense frame budget and the agent appends per-window findings to the report, so nothing is missed on hour-long videos.
 
 4. **Surface the report.** The script prints the path of the report it wrote (default `watch-analysis.md` in the current directory). `Read` that file and present its contents to the user.
 

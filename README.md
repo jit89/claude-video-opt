@@ -51,12 +51,15 @@ Or run the launcher directly. Just a source and a question works (no flags neede
 # Minimal — source + question, no trailing flags:
 ./scripts/watch-mimo.sh "<url-or-path>" "your question"
 
-# Forward extra watch.py flags after a `--` separator:
-./scripts/watch-mimo.sh "<url-or-path>" "your question" -- --resolution 1024 --start 1:00 --end 2:00
+# Clean up frames afterward, and forward extra watch.py flags after `--`:
+./scripts/watch-mimo.sh "<url-or-path>" "your question" --cleanup -- --resolution 1024 --start 1:00 --end 2:00
 ```
 - Both forms work; the `--` is only needed when you pass extra `watch.py` flags.
+- `--cleanup` removes the extracted-frames working dir after the report is written (the downloaded video stays cached).
 - Pass `--resolution 1024` when you want on-screen code/text read accurately.
 - The report is written to the **current directory** as `watch-analysis.md` (override with `$WATCH_ANALYSIS_OUT`).
+
+**Long videos are windowed automatically.** Past 10 minutes (configurable via `$WATCH_WINDOW_SECONDS`), the harness splits the video into 10-minute windows and the agent processes them in order — each window gets its own dense, per-shot frame budget and its findings are appended to the report as durable working memory. So an hour-long video is covered completely instead of being squeezed into a single 100-frame "sparse scan." Explicit `--start`/`--end` ranges skip windowing.
 
 ### MiMo configuration (`~/.config/watch/.env`)
 | Var | Value |
