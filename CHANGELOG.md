@@ -10,6 +10,7 @@ All notable changes to `/watch` are documented here.
 
 - On-disk download cache in `scripts/download.py` — URL downloads are keyed by a SHA-256 hash of the URL and reused on later runs (video + subtitles + info.json). Cache root is `~/.cache/watch/downloads` or `$WATCH_CACHE_DIR`. A `.complete` sentinel guards against serving partial downloads, and cache hits no longer require yt-dlp to be installed. `--no-cache` forces a re-download.
 - Time-aligned `## Timeline` section in the report — frames and transcript lines are merged in chronological order so the model can see what's on screen as each line is spoken. Replaces the standalone transcript block; the `## Frames` path list (for the Read tool) is unchanged.
+- MiMo-V2.5 harness in `scripts/watch-mimo.sh` — runs the pipeline under a headless Claude Code process backed by MiMo-V2.5 (via `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` pointed at MiMo's Anthropic-compatible endpoint), so MiMo itself drives `watch.py`, reads the frames with the Read tool, and reasons over them. Verified against MiMo's token-plan endpoint: `x-api-key` auth, image content blocks, tool use, extended thinking, and streaming all work. Config via `MIMO_API_KEY` / `MIMO_BASE_URL` / `MIMO_MODEL` in `~/.config/watch/.env` (pay-as-you-go `sk-` or Token Plan `tp-`); `setup.py` scaffolds them.
 
 ### Changed
 - Full-video passes now default to scene-change sampling. Focused mode (`--start`/`--end`) and an explicit `--fps` still use uniform sampling.

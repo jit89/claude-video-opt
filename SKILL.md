@@ -83,6 +83,8 @@ Optional flags:
 - `--no-scene-change` — force uniform every-N-seconds sampling instead of scene-change detection
 - `--no-cache` — re-download a URL even if it's already cached (cache lives at `~/.cache/watch/downloads`, or `$WATCH_CACHE_DIR`)
 - `--out-dir DIR` — keep working files somewhere specific (default: an auto-generated tmp dir)
+
+To watch with **MiMo-V2.5 as the agent** instead of Claude, use `scripts/watch-mimo.sh <url-or-path> "question"` — it launches a headless Claude Code process backed by MiMo (config in `~/.config/watch/.env`: `MIMO_API_KEY`, `MIMO_BASE_URL`, `MIMO_MODEL`).
 - `--whisper groq|openai` — force a specific Whisper backend (default: prefer Groq if both keys exist)
 - `--no-whisper` — disable the Whisper fallback entirely (frames-only if no captions)
 

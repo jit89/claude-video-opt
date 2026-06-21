@@ -154,6 +154,20 @@ Other knobs (passed to `scripts/watch.py`):
 - `--no-whisper` — disable transcription entirely; frames only.
 - `--out-dir DIR` — keep working files somewhere specific (default: auto-generated tmp dir).
 
+## Watching with MiMo-V2.5 instead of Claude
+
+`scripts/watch-mimo.sh` runs the whole pipeline under a headless Claude Code process **backed by MiMo-V2.5** — MiMo becomes the agent: it runs `watch.py`, reads the extracted frames via the Read tool, and reasons over them with its own thinking. (Same sibling-process pattern as a custom `ANTHROPIC_BASE_URL` provider.)
+
+```bash
+./scripts/watch-mimo.sh "<url-or-path>" "your question" -- --start 1:00 --end 2:00
+```
+
+Config lives in `~/.config/watch/.env`:
+
+- `MIMO_API_KEY` — `tp-…` (Token Plan) or `sk-…` (pay-as-you-go). **Required.**
+- `MIMO_BASE_URL` — OpenAI-format base (e.g. `https://token-plan-sgp.xiaomimimo.com/v1`); the launcher derives MiMo's Anthropic base by replacing the trailing `/v1` with `/anthropic`. Pay-as-you-go can leave it blank.
+- `MIMO_MODEL` — `mimo-v2.5` (default, 1× credits) or `mimo-v2.5-pro` (2×).
+
 ## Limits
 
 - **Best accuracy: under 10 minutes.** Past that the script prints a "sparse scan" warning — re-run focused on the part you actually care about with `--start`/`--end`.

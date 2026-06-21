@@ -46,6 +46,23 @@ ENV_TEMPLATE = """# /watch API configuration
 
 GROQ_API_KEY=
 OPENAI_API_KEY=
+
+# MiMo-V2.5 harness (optional) — used by scripts/watch-mimo.sh to run a
+# headless Claude Code process backed by MiMo-V2.5 as the video-understanding
+# agent (it drives watch.py and reads the frames itself). The OpenAI-format
+# MIMO_BASE_URL is reused; the launcher derives MiMo's Anthropic base from it.
+#
+# Token Plan (subscription): key is `tp-xxxxx`; copy your dedicated Base URL
+#   from platform.xiaomimimo.com/#/console/plan-manage into MIMO_BASE_URL.
+# Pay-as-you-go: key is `sk-xxxxx`; Base URL is https://api.xiaomimimo.com/v1
+#   (the default — you can leave MIMO_BASE_URL blank).
+#
+# MIMO_MODEL: mimo-v2.5 (1x credits, default) or mimo-v2.5-pro (2x).
+# Leave MIMO_API_KEY blank if you are not using the MiMo harness.
+
+MIMO_API_KEY=
+MIMO_BASE_URL=
+MIMO_MODEL=mimo-v2.5
 """
 
 
