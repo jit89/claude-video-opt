@@ -99,6 +99,33 @@ CLAUDE_BIN="${CLAUDE_REAL_BIN:-}"
 : "${CLAUDE_BIN:?could not find the claude binary (set CLAUDE_REAL_BIN)}"
 
 echo "[watch-mimo] model=${MIMO_MODEL} base=${ANTHROPIC_BASE_URL}" >&2
-exec "$CLAUDE_BIN" -p "$PROMPT" \
-  --permission-mode acceptEdits \
-  --allowedTools "Read,Edit,Write,Bash,Glob,Grep,Skill"
+
+# Short transient-retry on rate limits / overload, then surface a clean exit
+# code so the caller (e.g. the /watch-mimo command) can fall back to the
+# standard /watch flow. LONG quota waits are NOT done here.
+MAX_RETRIES="${WATCH_MIMO_MAX_RETRIES:-2}"   # initial attempt + (MAX_RETRIES-1) retries
+LOG="$(mktemp -t watch-mimo-XXXXXX.log)"
+attempt=1
+while :; do
+  set +e
+  "$CLAUDE_BIN" -p "$PROMPT" \
+    --permission-mode acceptEdits \
+    --allowedTools "Read,Edit,Write,Bash,Glob,Grep,Skill" 2>&1 | tee "$LOG"
+  rc=${PIPESTATUS[0]}
+  set -e
+
+  [[ $rc -eq 0 ]] && exit 0
+
+  if grep -qiE '429|rate.?limit|overloaded|quota|too many requests' "$LOG" \
+     && (( attempt < MAX_RETRIES )); then
+    backoff=$(( 10 * attempt ))
+    echo "[watch-mimo] transient error — retry ${attempt}/${MAX_RETRIES} in ${backoff}s" >&2
+    sleep "$backoff"
+    attempt=$(( attempt + 1 ))
+    continue
+  fi
+
+  echo "[watch-mimo] FAILED (exit ${rc}); MiMo harness did not complete. Log: ${LOG}" >&2
+  echo "[watch-mimo] Fallback: re-run with the standard /watch flow (Claude as the agent)." >&2
+  exit "$rc"
+done

@@ -1,218 +1,112 @@
-# /watch
+# /watch — enhanced fork
 
-**Give Claude the ability to watch any video.**
+**Give Claude (or MiMo-V2.5) the ability to watch any video.**
 
-Claude Code:
-```
-/plugin marketplace add bradautomates/claude-video
-/plugin install watch@claude-video
-```
-
-claude.ai (web): [download `watch.skill`](https://github.com/bradautomates/claude-video/releases/latest) and drop it into Settings → Capabilities → Skills.
-
-Codex / generic skills:
-```bash
-git clone https://github.com/bradautomates/claude-video.git ~/.codex/skills/watch
-```
-
-Zero config to start — `yt-dlp` and `ffmpeg` install on first run via `brew` on macOS (Linux/Windows print exact commands). Captions cover most public videos for free. Whisper API key is only needed when a video has no captions.
+> This is an **enhanced fork** of [`bradautomates/claude-video`](https://github.com/bradautomates/claude-video) — the original `/watch` skill by Bradley Bonanno (MIT). It downloads a video with `yt-dlp`, extracts frames with `ffmpeg`, pulls a timestamped transcript (free captions, Whisper fallback), and hands frames + transcript to an agent so it can answer questions about what's actually on screen.
+>
+> **This README documents only what's different in this fork.** For the full base story — how the pipeline works end to end, install on every surface (Claude Code / claude.ai / Codex), the frame-budget math, Whisper setup, and limits — see the **[original README](https://github.com/bradautomates/claude-video#readme)**. Everything there still applies here.
 
 ---
 
-Claude can read a webpage, run a script, browse a repo. What it can't do, out of the box, is *watch a video*. You paste a YouTube link and it has to either guess from the title or pull a transcript that's missing 90% of what's on screen.
+## What's new in this fork
 
-With Claude Video `/watch` you can paste a URL or a local path, ask a question, and Claude downloads the video, extracts frames at an auto-scaled rate, pulls a timestamped transcript (free captions when available, Whisper API as fallback), and `Read`s every frame as an image. By the time it answers, it has *seen* the video and *heard* the audio.
+Four additive enhancements on top of upstream v0.1.3. The base pipeline (yt-dlp → ffmpeg → captions/Whisper) is unchanged; nothing below breaks existing `/watch` usage.
 
+### 1. Scene-change frame extraction (`scripts/frames.py`)
+Instead of sampling one frame every *N* seconds, the default full-video pass now emits **one frame per detected shot** using ffmpeg's `select='gt(scene,0.3)'` filter. This keeps token cost flat on long videos and never misses a hard cut.
+- Always emits frame 0 (the scene filter only fires on *changes*).
+- **Falls back to uniform sampling** automatically when a source is static (screen recordings, long talking heads) and yields too few scenes.
+- **Fixes a truncation bug:** the frame budget is now spread *evenly across the whole timeline* (keeping first and last), so long, cut-heavy videos are no longer truncated to just their opening.
+- Disable with `--no-scene-change`. Focused mode (`--start`/`--end`) and an explicit `--fps` still use uniform sampling.
+
+### 2. Time-aligned `## Timeline` (`scripts/watch.py`)
+The report now interleaves **frames and transcript lines in chronological order**, so the agent sees what's on screen *as each line is spoken* (frame markers `F` and transcript lines `»`, merged by timestamp). The plain `## Frames` path list is still there for the Read tool.
+
+### 3. On-disk download cache (`scripts/download.py`)
+URL downloads are cached by a hash of the URL under `~/.cache/watch/downloads` (override with `$WATCH_CACHE_DIR`) and **reused on later runs** — video, subtitles, and metadata. A `.complete` sentinel prevents serving partial downloads, and cache hits don't even require `yt-dlp` installed. Force a fresh download with `--no-cache`.
+
+### 4. Watch with **MiMo-V2.5 as the agent** — `/watch-mimo` (`scripts/watch-mimo.sh`)
+The headline feature. Instead of Claude reading the frames, this runs the whole pipeline under a **headless Claude Code process backed by Xiaomi's MiMo-V2.5**: `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` are pointed at MiMo's Anthropic-compatible endpoint, so **MiMo itself** drives `watch.py`, reads each frame with the Read tool, reasons over them with its own thinking, and writes a report. (Same sibling-process pattern as running Claude Code against any custom Anthropic provider.)
+
+Verified against MiMo's Token-Plan endpoint: `x-api-key` auth, image content blocks, tool use, extended thinking, and SSE streaming all work — and a real run extracted on-screen code from 1024px frames into a structured report.
+
+---
+
+## Using it
+
+### Base flow — Claude watches (`/watch`)
+Unchanged from upstream:
 ```
 /watch https://youtu.be/dQw4w9WgXcQ what happens at the 30 second mark?
+/watch ~/Movies/screen-recording.mp4 when does the UI break?
 ```
+New knobs on `scripts/watch.py`: `--no-scene-change`, `--no-cache` (the others — `--start`/`--end`, `--resolution`, `--max-frames`, `--fps`, `--whisper`, `--no-whisper` — are documented upstream).
 
-## Why this exists
+### New flow — MiMo watches (`/watch-mimo`)
+```
+/watch-mimo https://youtu.be/abc "Detailed report; extract any on-screen code verbatim"
+```
+Or run the launcher directly (forward extra `watch.py` flags after `--`):
+```bash
+./scripts/watch-mimo.sh "<url-or-path>" "your question" -- --resolution 1024 --start 1:00 --end 2:00
+```
+- Pass `--resolution 1024` when you want on-screen code/text read accurately.
+- The report is written to the **current directory** as `watch-analysis.md` (override with `$WATCH_ANALYSIS_OUT`).
 
-I built this because I'm constantly using video to keep up with content. If I see a YouTube video that's blowing up, I want to know how the creator structured the hook — what's on screen in the first 3 seconds, what they said, why it worked. That used to mean watching it myself with a notepad. Now I just paste the URL and ask.
+### MiMo configuration (`~/.config/watch/.env`)
+| Var | Value |
+|-----|-------|
+| `MIMO_API_KEY` | **Required.** `tp-…` (Token Plan) or `sk-…` (pay-as-you-go). |
+| `MIMO_BASE_URL` | OpenAI-format base, e.g. `https://token-plan-sgp.xiaomimimo.com/v1` (copy your dedicated Token-Plan base URL from the MiMo console). The launcher derives MiMo's Anthropic base by swapping the trailing `/v1` → `/anthropic`. Pay-as-you-go can leave this blank. |
+| `MIMO_MODEL` | `mimo-v2.5` (default, 1× credits) or `mimo-v2.5-pro` (2×). |
 
-The other half is summarization. Most YouTube videos don't deserve 20 minutes of my attention. I hand the URL to Claude, it pulls the transcript, and tells me what actually happened. If the visual matters, frames come along too. If it's a podcast or a talking head, transcript is enough.
+`scripts/setup.py` scaffolds these placeholders into the `.env` alongside the Whisper keys.
 
-Claude is great at reading and synthesizing — but until now, video was the one input I couldn't hand it. Pasting a YouTube link got you nothing useful. `/watch` closes that gap.
+---
 
-## What people actually use it for
+## Does `/watch-mimo` have a fallback?
 
-**Analyze someone else's content.** `/watch https://youtu.be/<viral-video> what hook did they open with?` Claude looks at the first frames, reads the opening transcript, breaks down the structure. Same for ad creative, competitor launches, podcast intros, anything where the *how* matters as much as the *what*.
+Yes — two layers:
 
-**Diagnose a bug from a video.** Someone sends you a screen recording of something broken. `/watch bug-repro.mov what's going wrong?` Claude watches the recording, finds the frame where the issue appears, describes what's on screen, often catches the cause without you ever opening the file.
+1. **Transient retry in the launcher.** `watch-mimo.sh` retries on rate-limit / overload with a short backoff (configurable via `$WATCH_MIMO_MAX_RETRIES`), then exits with a clean non-zero code if it still can't complete.
+2. **Fall back to Claude.** If the harness ultimately fails, the `/watch-mimo` command falls back to the **standard `/watch` flow** — it runs `watch.py` directly and lets the host Claude read the frames and answer. Because the download is already cached and `watch.py` is provider-independent, this fallback is fast and always available.
 
-**Summarize a video.** `/watch https://youtu.be/<long-thing> summarize this` does the obvious thing — pulls the structure, the key moments, what was actually said and shown. Faster than watching at 2x.
+So a MiMo outage degrades gracefully to "Claude watches it instead," never to a dead end.
 
-## How it works
+---
 
-1. **You paste a video and a question.** URL (anything yt-dlp supports — YouTube, Loom, TikTok, X, Instagram, plus a few hundred more) or a local path (`.mp4`, `.mov`, `.mkv`, `.webm`).
-2. **`yt-dlp` downloads it.** For URLs, into a temp working directory. For local files, no download — just probed in place.
-3. **`ffmpeg` extracts frames at an auto-scaled rate.** The frame budget is duration-aware: ≤30s gets ~30 frames, 30-60s gets ~40, 1-3min gets ~60, 3-10min gets ~80, longer gets 100 sparsely. Hard ceilings: 2 fps, 100 frames. JPEGs at 512px wide by default — bump with `--resolution 1024` if Claude needs to read on-screen text.
-4. **The transcript comes from one of two places.** First try: `yt-dlp` pulls native captions (manual or auto-generated) from the source. Free, instant, accurate-ish. Fallback: extract a mono 16 kHz audio clip and ship it to Whisper — Groq's `whisper-large-v3` (preferred — cheaper and faster) or OpenAI's `whisper-1`.
-5. **Frames + transcript are handed to Claude.** The script prints frame paths with `t=MM:SS` markers and the transcript with timestamps. Claude `Read`s each frame in parallel — JPEGs render directly as images in its context.
-6. **Claude answers grounded in what's actually on screen and in the audio.** Not "based on the description" or "according to the title." It saw the frames. It heard the transcript. It answers the way someone who watched the video would.
-7. **Cleanup.** The script prints a working directory at the end. If you're not asking follow-ups, Claude removes it.
+## What's unchanged (see upstream for details)
 
-## Frame budget — why it matters
-
-Token cost is dominated by frames. Every frame is an image; image tokens add up fast. The script's auto-fps logic exists so you don't blow your context budget on a sparse scan of a 30-minute video that would have been better answered by a focused 30-second window.
-
-| Duration | Default frame budget | What you get |
-|----------|---------------------|--------------|
-| ≤30 s | ~30 frames | Dense — basically every key moment |
-| 30 s - 1 min | ~40 frames | Still dense |
-| 1 - 3 min | ~60 frames | Comfortable |
-| 3 - 10 min | ~80 frames | Sparse but workable |
-| > 10 min | 100 frames | "Sparse scan" warning — re-run focused |
-
-When the user names a moment ("around 2:30", "the last 30 seconds", "from 0:45 to 1:00"), pass `--start` / `--end`. Focused mode gets denser per-second budgets, capped at 2 fps. Far more useful than a sparse pass over the whole thing.
-
-## Install
-
-| Surface | Install |
-|---------|---------|
-| **Claude Code** | `/plugin marketplace add bradautomates/claude-video` then `/plugin install watch@claude-video` |
-| **claude.ai** (web) | [Download `watch.skill`](https://github.com/bradautomates/claude-video/releases/latest) → Settings → Capabilities → Skills → `+` |
-| **Codex** | `git clone https://github.com/bradautomates/claude-video.git ~/.codex/skills/watch` |
-| **Manual / dev** | `git clone https://github.com/bradautomates/claude-video.git ~/.claude/skills/watch` |
-
-### Claude Code
+Install, first-run setup, the frame-budget table, Whisper/Groq/OpenAI key setup, supported sites, the 25 MB Whisper limit, claude.ai/Codex packaging, and the `build-skill.sh` bundle — all behave exactly as in the **[original repo](https://github.com/bradautomates/claude-video#readme)**. Install the enhanced version as a plugin with:
 
 ```
-/plugin marketplace add bradautomates/claude-video
+/plugin marketplace add jit89/claude-video-opt
 /plugin install watch@claude-video
 ```
 
-Update later with `/plugin update watch@claude-video`.
-
-### claude.ai (web)
-
-1. [Download `watch.skill`](https://github.com/bradautomates/claude-video/releases/latest) from the latest release.
-2. Go to Settings → Capabilities → Skills.
-3. Click `+` and drop the file in.
-
-Enable "Code execution and file creation" under Capabilities first — the skill shells out to `ffmpeg` and `yt-dlp`, so it won't run without it.
-
-### Codex
-
-```bash
-git clone https://github.com/bradautomates/claude-video.git ~/.codex/skills/watch
-```
-
-### Manual (developer)
-
-```bash
-git clone https://github.com/bradautomates/claude-video.git ~/.claude/skills/watch
-```
-
-## First run
-
-On the first `/watch` call, the skill runs `scripts/setup.py --check`. If `ffmpeg` / `yt-dlp` aren't on your PATH, or no Whisper API key is set, it walks you through fixing it:
-
-- **macOS** — auto-runs `brew install ffmpeg yt-dlp`.
-- **Linux** — prints the exact `apt` / `dnf` / `pipx` commands.
-- **Windows** — prints the `winget` / `pip` commands.
-- **API key** — scaffolds `~/.config/watch/.env` (mode `0600`) with commented placeholders for `GROQ_API_KEY` (preferred) and `OPENAI_API_KEY`.
-
-After setup, preflight is silent and `/watch` just works. The check is a sub-100ms lookup, so it doesn't slow you down on subsequent runs.
-
-## Bring your own keys
-
-Captions cover the majority of public videos for free. The Whisper fallback only kicks in when a video genuinely has no caption track — typically local files, TikToks, some Vimeos, and the occasional caption-less YouTube upload.
-
-| Capability | What you need | Cost |
-|------------|---------------|------|
-| Download + native captions | `yt-dlp` + `ffmpeg` | Free |
-| Whisper fallback (preferred) | [Groq API key](https://console.groq.com/keys) — `whisper-large-v3` | Cheap, fast |
-| Whisper fallback (alt) | [OpenAI API key](https://platform.openai.com/api-keys) — `whisper-1` | Standard pricing |
-| Disable Whisper entirely | `--no-whisper` | Free, frames-only when no captions |
-
-## Usage
-
-```
-/watch https://youtu.be/dQw4w9WgXcQ what happens at the 30 second mark?
-/watch https://www.tiktok.com/@user/video/123 summarize this
-/watch ~/Movies/screen-recording.mp4 when does the UI break?
-/watch https://vimeo.com/123 what tools does she mention?
-```
-
-Focused on a specific section — denser frame budget, lower token cost:
-```
-/watch https://youtu.be/abc --start 2:15 --end 2:45
-/watch video.mp4 --start 50 --end 60
-/watch "$URL" --start 1:12:00            # from 1h12m to end
-```
-
-Other knobs (passed to `scripts/watch.py`):
-
-- `--max-frames N` — lower the frame cap for a tighter token budget.
-- `--resolution W` — bump frame width to 1024 px when Claude needs to read on-screen text (slides, terminals, code).
-- `--fps F` — override the auto-fps calculation (still capped at 2 fps). Forces uniform sampling.
-- `--no-scene-change` — force uniform every-N-seconds sampling instead of scene-change detection.
-- `--no-cache` — re-download a URL even if it's already in the on-disk cache (`~/.cache/watch/downloads`, override with `$WATCH_CACHE_DIR`).
-- `--whisper groq|openai` — force a specific Whisper backend.
-- `--no-whisper` — disable transcription entirely; frames only.
-- `--out-dir DIR` — keep working files somewhere specific (default: auto-generated tmp dir).
-
-## Watching with MiMo-V2.5 instead of Claude
-
-`scripts/watch-mimo.sh` runs the whole pipeline under a headless Claude Code process **backed by MiMo-V2.5** — MiMo becomes the agent: it runs `watch.py`, reads the extracted frames via the Read tool, and reasons over them with its own thinking. (Same sibling-process pattern as a custom `ANTHROPIC_BASE_URL` provider.)
-
-```bash
-./scripts/watch-mimo.sh "<url-or-path>" "your question" -- --start 1:00 --end 2:00
-```
-
-Installed as a plugin, the same flow is a slash command — **`/watch-mimo <url-or-path> [question]`** — which runs the launcher and surfaces the generated report. The report is written to the current directory as `watch-analysis.md` (override with `$WATCH_ANALYSIS_OUT`).
-
-Config lives in `~/.config/watch/.env`:
-
-- `MIMO_API_KEY` — `tp-…` (Token Plan) or `sk-…` (pay-as-you-go). **Required.**
-- `MIMO_BASE_URL` — OpenAI-format base (e.g. `https://token-plan-sgp.xiaomimimo.com/v1`); the launcher derives MiMo's Anthropic base by replacing the trailing `/v1` with `/anthropic`. Pay-as-you-go can leave it blank.
-- `MIMO_MODEL` — `mimo-v2.5` (default, 1× credits) or `mimo-v2.5-pro` (2×).
-
-## Limits
-
-- **Best accuracy: under 10 minutes.** Past that the script prints a "sparse scan" warning — re-run focused on the part you actually care about with `--start`/`--end`.
-- **Hard caps: 2 fps, 100 frames.** Frame count drives token cost; the script enforces this even when the auto-fps math would imply higher.
-- **Whisper upload limit: 25 MB.** At mono 16 kHz that's about 50 minutes of audio. Longer videos need either captions or `--start`/`--end` to a smaller window.
-- **No private platforms.** This skill doesn't log into anything. Public URLs and local files only. If yt-dlp can't reach it without auth, neither can `/watch`.
-
-## Structure
+## Structure (additions in **bold**)
 
 ```
 .
-├── SKILL.md                 # skill contract — loaded by all three surfaces
+├── SKILL.md
+├── commands/
+│   ├── watch.md                 # /watch
+│   └── watch-mimo.md            # /watch-mimo  (NEW)
 ├── scripts/
-│   ├── watch.py             # entry point — orchestrates download → frames → transcript
-│   ├── download.py          # yt-dlp wrapper
-│   ├── frames.py            # ffmpeg frame extraction + auto-fps logic
-│   ├── transcribe.py        # VTT parsing + dedupe + Whisper orchestration
-│   ├── whisper.py           # Groq / OpenAI clients (pure stdlib)
-│   ├── setup.py             # preflight + installer
-│   └── build-skill.sh       # build dist/watch.skill for claude.ai upload
-├── hooks/                   # SessionStart status hook (Claude Code only)
-├── .claude-plugin/          # plugin.json + marketplace.json (Claude Code)
-├── .codex-plugin/           # codex packaging
-└── .github/workflows/       # release.yml — auto-builds watch.skill on tag push
+│   ├── watch.py                 # + scene-change, timeline, cache wiring
+│   ├── download.py              # + on-disk URL cache
+│   ├── frames.py                # + extract_scene_change()
+│   ├── transcribe.py
+│   ├── whisper.py
+│   ├── setup.py                 # + MIMO_* env scaffolding
+│   └── watch-mimo.sh            # MiMo-V2.5 harness launcher  (NEW)
+├── hooks/  ·  .claude-plugin/  ·  .codex-plugin/  ·  .github/workflows/
 ```
 
-## Develop
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-```bash
-# Build the claude.ai upload bundle:
-bash scripts/build-skill.sh      # → dist/watch.skill
-```
+## License
 
-Releasing: tag `vX.Y.Z`, push the tag. The workflow builds `dist/watch.skill` and attaches it to the GitHub release.
+MIT — same as upstream. Built on `yt-dlp`, `ffmpeg`, Claude's multimodal `Read` tool, Whisper ([Groq](https://groq.com) / [OpenAI](https://openai.com)), and [MiMo-V2.5](https://mimo.xiaomi.com).
 
-See [CHANGELOG.md](CHANGELOG.md) for version history.
-
-## Open source
-
-MIT license.
-
-Built on `yt-dlp`, `ffmpeg`, and Claude's multimodal `Read` tool. Whisper transcription via [Groq](https://groq.com) or [OpenAI](https://openai.com).
-
----
-
-[github.com/bradautomates/claude-video](https://github.com/bradautomates/claude-video) · [LICENSE](LICENSE)
+Original project: [github.com/bradautomates/claude-video](https://github.com/bradautomates/claude-video) · [LICENSE](LICENSE)

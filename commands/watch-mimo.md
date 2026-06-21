@@ -24,3 +24,5 @@ Steps:
    ```
 
 4. **Surface the report.** The script prints the path of the report it wrote (default `watch-analysis.md` in the current directory). `Read` that file and present its contents to the user.
+
+5. **Fallback if the harness fails.** If `watch-mimo.sh` exits non-zero (MiMo rate-limited, errored, or couldn't complete the loop — it already retried transient errors internally), do **not** stop. Fall back to the standard `/watch` flow with *Claude* as the agent: run `python3 "${CLAUDE_SKILL_DIR}/scripts/watch.py" "<source>" --resolution 1024 [range flags]` yourself, `Read` each frame it lists, and answer the user's question from the frames + transcript. Tell the user MiMo was unavailable and you analyzed it directly. Because `watch.py` is provider-independent, the download is already cached, so this fallback is fast.
