@@ -46,10 +46,15 @@ New knobs on `scripts/watch.py`: `--no-scene-change`, `--no-cache` (the others â
 ```
 /watch-mimo https://youtu.be/abc "Detailed report; extract any on-screen code verbatim"
 ```
-Or run the launcher directly (forward extra `watch.py` flags after `--`):
+Or run the launcher directly. Just a source and a question works (no flags needed):
 ```bash
+# Minimal â€” source + question, no trailing flags:
+./scripts/watch-mimo.sh "<url-or-path>" "your question"
+
+# Forward extra watch.py flags after a `--` separator:
 ./scripts/watch-mimo.sh "<url-or-path>" "your question" -- --resolution 1024 --start 1:00 --end 2:00
 ```
+- Both forms work; the `--` is only needed when you pass extra `watch.py` flags.
 - Pass `--resolution 1024` when you want on-screen code/text read accurately.
 - The report is written to the **current directory** as `watch-analysis.md` (override with `$WATCH_ANALYSIS_OUT`).
 
