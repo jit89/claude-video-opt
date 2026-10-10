@@ -249,7 +249,7 @@ def extract_scene_change(
     cmd += [
         "-i", str(Path(video_path).resolve()),
         "-vf", vf,
-        "-vsync", "vfr",
+        "-fps_mode", "vfr",
         "-frames:v", str(SCENE_DETECT_HARD_CAP),
         "-q:v", "4",
         output_pattern,

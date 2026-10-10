@@ -81,10 +81,10 @@ Optional flags:
 - `--resolution W` — change frame width in px (default 512; bump to 1024 only if the user needs to read on-screen text)
 - `--fps F` — override auto-fps (clamped to 2 fps max); forces uniform sampling
 - `--no-scene-change` — force uniform every-N-seconds sampling instead of scene-change detection
-- `--no-cache` — re-download a URL even if it's already cached (cache lives at `~/.cache/watch/downloads`, or `$WATCH_CACHE_DIR`)
+- `--no-cache` — re-download a URL even if it's already cached (videos live in `~/Documents/claude-video-reports/<dd-mm-yyyy>/<video-id>/`, or `$WATCH_LIBRARY_DIR`)
 - `--out-dir DIR` — keep working files somewhere specific (default: an auto-generated tmp dir)
 
-To watch with **MiMo-V2.5 as the agent** instead of Claude, use `scripts/watch-mimo.sh <url-or-path> "question"` — it launches a headless Claude Code process backed by MiMo (config in `~/.config/watch/.env`: `MIMO_API_KEY`, `MIMO_BASE_URL`, `MIMO_MODEL`).
+To watch with **DeepSeek inside a headless Codex process** instead of Claude, use `scripts/watch-video.sh <url-or-path> "question"` (config: `DEEPSEEK_API_KEY` in `~/.config/watch/.env` or `~/grok-coding-workflow/.env`). Claude Code is not used.
 - `--whisper groq|openai` — force a specific Whisper backend (default: prefer Groq if both keys exist)
 - `--no-whisper` — disable the Whisper fallback entirely (frames-only if no captions)
 

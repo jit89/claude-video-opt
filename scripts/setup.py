@@ -28,6 +28,10 @@ from pathlib import Path
 
 
 REQUIRED_BINARIES = ["ffmpeg", "ffprobe", "yt-dlp"]
+REPO_ROOT = Path(__file__).resolve().parent.parent
+VENV_DIR = REPO_ROOT / ".venv"
+VENV_YTDLP = VENV_DIR / "bin" / "yt-dlp"
+ENSURE_VENV = Path(__file__).resolve().parent / "ensure-venv.sh"
 CONFIG_DIR = Path.home() / ".config" / "watch"
 CONFIG_FILE = CONFIG_DIR / ".env"
 ENV_TEMPLATE = """# /watch API configuration
@@ -47,31 +51,45 @@ ENV_TEMPLATE = """# /watch API configuration
 GROQ_API_KEY=
 OPENAI_API_KEY=
 
-# MiMo-V2.5 harness (optional) — used by scripts/watch-mimo.sh to run a
-# headless Claude Code process backed by MiMo-V2.5 as the video-understanding
-# agent (it drives watch.py and reads the frames itself). The OpenAI-format
-# MIMO_BASE_URL is reused; the launcher derives MiMo's Anthropic base from it.
+# DeepSeek via headless Codex — used by scripts/watch-video.sh.
+# Isolated CODEX_HOME; does not rewrite ~/.codex/config.toml.
+# Same key as the rest of the house if you already have one.
 #
-# Token Plan (subscription): key is `tp-xxxxx`; copy your dedicated Base URL
-#   from platform.xiaomimimo.com/#/console/plan-manage into MIMO_BASE_URL.
-# Pay-as-you-go: key is `sk-xxxxx`; Base URL is https://api.xiaomimimo.com/v1
-#   (the default — you can leave MIMO_BASE_URL blank).
+# Get a key: https://platform.deepseek.com/api_keys
 #
-# MIMO_MODEL: mimo-v2.5 (1x credits, default) or mimo-v2.5-pro (2x).
-# Leave MIMO_API_KEY blank if you are not using the MiMo harness.
+# Leave DEEPSEEK_API_KEY blank here if the key already lives in
+# ~/grok-coding-workflow/.env — the harness reads that as a fallback.
 
-MIMO_API_KEY=
-MIMO_BASE_URL=
-MIMO_MODEL=mimo-v2.5
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com/
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_VISION_MODEL=deepseek-v4-flash
 """
 
 
 def _which(name: str) -> str | None:
+    if name == "yt-dlp":
+        if VENV_YTDLP.is_file() and os.access(VENV_YTDLP, os.X_OK):
+            return str(VENV_YTDLP)
+        return None
     return shutil.which(name)
 
 
 def _check_binaries() -> list[str]:
     return [b for b in REQUIRED_BINARIES if not _which(b)]
+
+
+def _ensure_venv() -> tuple[bool, str]:
+    """Install yt-dlp + curl_cffi into the project venv. Never system Python."""
+    if not ENSURE_VENV.is_file():
+        return False, f"missing {ENSURE_VENV}"
+    print(f"[setup] running: {ENSURE_VENV}", file=sys.stderr)
+    result = subprocess.run(["bash", str(ENSURE_VENV)])
+    if result.returncode != 0:
+        return False, f"ensure-venv.sh failed with exit code {result.returncode}"
+    if not _which("yt-dlp"):
+        return False, f"yt-dlp still missing at {VENV_YTDLP}"
+    return True, f"venv ready: {VENV_YTDLP}"
 
 
 def _check_file_permissions(path: Path) -> None:
@@ -138,6 +156,29 @@ def _scaffold_env() -> bool:
     return True
 
 
+DEEPSEEK_BLOCK = """
+# DeepSeek via headless Codex — scripts/watch-video.sh
+# Get a key: https://platform.deepseek.com/api_keys
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com/
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_VISION_MODEL=deepseek-v4-flash
+"""
+
+
+def _ensure_deepseek_keys() -> None:
+    """Append DeepSeek Vision keys to an existing .env that predates them."""
+    if not CONFIG_FILE.exists():
+        return
+    text = CONFIG_FILE.read_text(encoding="utf-8")
+    if any(line.strip().startswith("DEEPSEEK_API_KEY=") for line in text.splitlines()):
+        return
+    if text and not text.endswith("\n"):
+        text += "\n"
+    CONFIG_FILE.write_text(text + DEEPSEEK_BLOCK, encoding="utf-8")
+    print(f"[setup] appended DeepSeek Vision keys to {CONFIG_FILE}", file=sys.stderr)
+
+
 def _write_setup_complete() -> None:
     """Idempotently append SETUP_COMPLETE=true to .env.
 
@@ -169,8 +210,8 @@ def _brew_pkg(missing: list[str]) -> list[str]:
             if "ffmpeg" not in pkgs:
                 pkgs.append("ffmpeg")
         elif bin_name == "yt-dlp":
-            if "yt-dlp" not in pkgs:
-                pkgs.append("yt-dlp")
+            # yt-dlp + curl_cffi live in the project venv, not Homebrew.
+            continue
         else:
             pkgs.append(bin_name)
     return pkgs
@@ -198,8 +239,8 @@ def _install_hint_linux(missing: list[str]) -> str:
     hints = []
     if "ffmpeg" in pkgs:
         hints.append("apt: `sudo apt install ffmpeg` or dnf: `sudo dnf install ffmpeg`")
-    if "yt-dlp" in pkgs:
-        hints.append("`pipx install yt-dlp` (recommended) or `pip install --user yt-dlp`")
+    if "yt-dlp" in missing:
+        hints.append(f"bash {ENSURE_VENV}  (project venv; do not pip-install system Python)")
     return "\n  ".join(hints) if hints else "nothing to install"
 
 
@@ -208,8 +249,8 @@ def _install_hint_windows(missing: list[str]) -> str:
     hints = []
     if "ffmpeg" in pkgs:
         hints.append("winget: `winget install Gyan.FFmpeg`")
-    if "yt-dlp" in pkgs:
-        hints.append("winget: `winget install yt-dlp.yt-dlp` or pip: `pip install --user yt-dlp`")
+    if "yt-dlp" in missing:
+        hints.append(f"bash {ENSURE_VENV}  (project venv; do not pip-install system Python)")
     return "\n  ".join(hints) if hints else "nothing to install"
 
 
@@ -279,32 +320,41 @@ def cmd_json() -> int:
 def cmd_install() -> int:
     missing = _check_binaries()
     installed_deps = False
-    if missing:
+    brew_missing = [b for b in missing if b in ("ffmpeg", "ffprobe")]
+    need_venv = "yt-dlp" in missing
+    if brew_missing:
         system = platform.system()
         if system == "Darwin":
-            ok, msg = _install_macos(missing)
+            ok, msg = _install_macos(brew_missing)
             print(f"[setup] {msg}", file=sys.stderr)
             if not ok:
-                return 2
-            still_missing = _check_binaries()
-            if still_missing:
-                print(f"[setup] still missing after install: {', '.join(still_missing)}", file=sys.stderr)
                 return 2
             installed_deps = True
         elif system == "Linux":
             print("[setup] dependencies missing on Linux — please install:", file=sys.stderr)
-            print("  " + _install_hint_linux(missing), file=sys.stderr)
+            print("  " + _install_hint_linux(brew_missing), file=sys.stderr)
             return 2
         elif system == "Windows":
             print("[setup] dependencies missing on Windows — please install:", file=sys.stderr)
-            print("  " + _install_hint_windows(missing), file=sys.stderr)
+            print("  " + _install_hint_windows(brew_missing), file=sys.stderr)
             return 2
         else:
             print(f"[setup] unsupported platform ({system}) for auto-install. Install manually:", file=sys.stderr)
-            print(f"  missing: {', '.join(missing)}", file=sys.stderr)
+            print(f"  missing: {', '.join(brew_missing)}", file=sys.stderr)
             return 2
+    if need_venv:
+        ok, msg = _ensure_venv()
+        print(f"[setup] {msg}", file=sys.stderr)
+        if not ok:
+            return 2
+        installed_deps = True
+    still_missing = _check_binaries()
+    if still_missing:
+        print(f"[setup] still missing after install: {', '.join(still_missing)}", file=sys.stderr)
+        return 2
 
     created = _scaffold_env()
+    _ensure_deepseek_keys()
     if created:
         print(f"[setup] created config: {CONFIG_FILE}")
     else:

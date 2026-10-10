@@ -1,0 +1,3 @@
+# Project venv only (.venv/). Never pip-install these into system Python.
+yt-dlp>=2026.8.19
+curl_cffi>=0.13

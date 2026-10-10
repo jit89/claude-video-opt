@@ -1,6 +1,6 @@
 # /watch — enhanced fork
 
-**Give Claude (or MiMo-V2.5) the ability to watch any video.**
+**Give Claude (or DeepSeek Vision) the ability to watch any video.**
 
 > This is an **enhanced fork** of [`bradautomates/claude-video`](https://github.com/bradautomates/claude-video) — the original `/watch` skill by Bradley Bonanno (MIT). It downloads a video with `yt-dlp`, extracts frames with `ffmpeg`, pulls a timestamped transcript (free captions, Whisper fallback), and hands frames + transcript to an agent so it can answer questions about what's actually on screen.
 >
@@ -22,13 +22,11 @@ Instead of sampling one frame every *N* seconds, the default full-video pass now
 ### 2. Time-aligned `## Timeline` (`scripts/watch.py`)
 The report now interleaves **frames and transcript lines in chronological order**, so the agent sees what's on screen *as each line is spoken* (frame markers `F` and transcript lines `»`, merged by timestamp). The plain `## Frames` path list is still there for the Read tool.
 
-### 3. On-disk download cache (`scripts/download.py`)
-URL downloads are cached by a hash of the URL under `~/.cache/watch/downloads` (override with `$WATCH_CACHE_DIR`) and **reused on later runs** — video, subtitles, and metadata. A `.complete` sentinel prevents serving partial downloads, and cache hits don't even require `yt-dlp` installed. Force a fresh download with `--no-cache`.
+### 3. Dated video library (`scripts/library.py`, `scripts/download.py`)
+URL downloads land in `~/Documents/claude-video-reports/<dd-mm-yyyy>/<video-id>/` (dated by the day of first download; override the root with `$WATCH_LIBRARY_DIR`), and the harness writes `report.md` into the same folder. A video already in the library is **reused on later runs** — video, subtitles, and metadata. A `.complete` sentinel prevents serving partial downloads, and cache hits don't even require `yt-dlp` installed. Force a fresh download with `--no-cache`.
 
-### 4. Watch with **MiMo-V2.5 as the agent** — `/watch-mimo` (`scripts/watch-mimo.sh`)
-The headline feature. Instead of Claude reading the frames, this runs the whole pipeline under a **headless Claude Code process backed by Xiaomi's MiMo-V2.5**: `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` are pointed at MiMo's Anthropic-compatible endpoint, so **MiMo itself** drives `watch.py`, reads each frame with the Read tool, reasons over them with its own thinking, and writes a report. (Same sibling-process pattern as running Claude Code against any custom Anthropic provider.)
-
-Verified against MiMo's Token-Plan endpoint: `x-api-key` auth, image content blocks, tool use, extended thinking, and SSE streaming all work — and a real run extracted on-screen code from 1024px frames into a structured report.
+### 4. Watch with **DeepSeek inside Codex** — `/watch-video` (`scripts/watch-video.sh`)
+The headline feature. A **headless Codex** process (`codex exec`), pointed at DeepSeek, drives `watch.py`, views the extracted JPEGs, and writes the report. Isolated `CODEX_HOME` at `~/.cache/watch-video/codex` — interactive Codex/ChatGPT is untouched. Long videos are still split into 10-minute windows. Claude Code is not used.
 
 ---
 
@@ -42,44 +40,43 @@ Unchanged from upstream:
 ```
 New knobs on `scripts/watch.py`: `--no-scene-change`, `--no-cache` (the others — `--start`/`--end`, `--resolution`, `--max-frames`, `--fps`, `--whisper`, `--no-whisper` — are documented upstream).
 
-### New flow — MiMo watches (`/watch-mimo`)
+### New flow — DeepSeek watches via Codex (`/watch-video`)
 ```
-/watch-mimo https://youtu.be/abc "Detailed report; extract any on-screen code verbatim"
+/watch-video https://youtu.be/abc "Detailed report; extract any on-screen code verbatim"
 ```
 Or run the launcher directly. Just a source and a question works (no flags needed):
 ```bash
 # Minimal — source + question, no trailing flags:
-./scripts/watch-mimo.sh "<url-or-path>" "your question"
+./scripts/watch-video.sh "<url-or-path>" "your question"
 
 # Clean up frames afterward, and forward extra watch.py flags after `--`:
-./scripts/watch-mimo.sh "<url-or-path>" "your question" --cleanup -- --resolution 1024 --start 1:00 --end 2:00
+./scripts/watch-video.sh "<url-or-path>" "your question" --cleanup -- --resolution 1024 --start 1:00 --end 2:00
 ```
 - Both forms work; the `--` is only needed when you pass extra `watch.py` flags.
 - `--cleanup` removes the extracted-frames working dir after the report is written (the downloaded video stays cached).
 - Pass `--resolution 1024` when you want on-screen code/text read accurately.
 - The report is written to the **current directory** as `watch-analysis.md` (override with `$WATCH_ANALYSIS_OUT`).
+- Requires Codex CLI ≥ 0.144 on `PATH` (or `$CODEX_BIN`).
 
-**Long videos are windowed automatically.** Past 10 minutes (configurable via `$WATCH_WINDOW_SECONDS`), the harness splits the video into 10-minute windows and the agent processes them in order — each window gets its own dense, per-shot frame budget and its findings are appended to the report as durable working memory. So an hour-long video is covered completely instead of being squeezed into a single 100-frame "sparse scan." Explicit `--start`/`--end` ranges skip windowing.
+**Long videos are windowed automatically.** Past 10 minutes (configurable via `$WATCH_WINDOW_SECONDS`), the harness splits the video into 10-minute windows — Codex/DeepSeek appends per-window findings to the report as durable working memory. Explicit `--start`/`--end` ranges skip windowing.
 
-### MiMo configuration (`~/.config/watch/.env`)
+### DeepSeek configuration (`~/.config/watch/.env`)
 | Var | Value |
 |-----|-------|
-| `MIMO_API_KEY` | **Required.** `tp-…` (Token Plan) or `sk-…` (pay-as-you-go). |
-| `MIMO_BASE_URL` | OpenAI-format base, e.g. `https://token-plan-sgp.xiaomimimo.com/v1` (copy your dedicated Token-Plan base URL from the MiMo console). The launcher derives MiMo's Anthropic base by swapping the trailing `/v1` → `/anthropic`. Pay-as-you-go can leave this blank. |
-| `MIMO_MODEL` | `mimo-v2.5` (default, 1× credits) or `mimo-v2.5-pro` (2×). |
+| `DEEPSEEK_API_KEY` | **Required** unless already set in the environment or `~/grok-coding-workflow/.env`. [platform.deepseek.com](https://platform.deepseek.com/api_keys). |
+| `DEEPSEEK_BASE_URL` | Default `https://api.deepseek.com/`. |
+| `DEEPSEEK_MODEL` | Default `deepseek-v4-flash`. `DEEPSEEK_VISION_MODEL` is accepted as an alias. |
 
-`scripts/setup.py` scaffolds these placeholders into the `.env` alongside the Whisper keys.
+`scripts/setup.py` scaffolds these placeholders into the `.env` alongside the Whisper keys. Isolated Codex state lives at `~/.cache/watch-video/codex` and does **not** rewrite `~/.codex/config.toml`.
 
 ---
 
-## Does `/watch-mimo` have a fallback?
+## Does `/watch-video` have a fallback?
 
 Yes — two layers:
 
-1. **Transient retry in the launcher.** `watch-mimo.sh` retries on rate-limit / overload with a short backoff (configurable via `$WATCH_MIMO_MAX_RETRIES`), then exits with a clean non-zero code if it still can't complete.
-2. **Fall back to Claude.** If the harness ultimately fails, the `/watch-mimo` command falls back to the **standard `/watch` flow** — it runs `watch.py` directly and lets the host Claude read the frames and answer. Because the download is already cached and `watch.py` is provider-independent, this fallback is fast and always available.
-
-So a MiMo outage degrades gracefully to "Claude watches it instead," never to a dead end.
+1. **Transient retry in the launcher.** `watch-video.sh` retries on rate-limit / overload with a short backoff (configurable via `$WATCH_VIDEO_MAX_RETRIES`), then exits with a clean non-zero code if it still can't complete.
+2. **Fall back to the host agent.** If the harness ultimately fails, `/watch-video` falls back to the **standard `/watch` flow** — it runs `watch.py` directly and lets the host (Grok) read the frames and answer. Because the download is already cached and `watch.py` is provider-independent, this fallback is fast and always available. Do not fall back to Claude Code.
 
 ---
 
@@ -99,15 +96,16 @@ Install, first-run setup, the frame-budget table, Whisper/Groq/OpenAI key setup,
 ├── SKILL.md
 ├── commands/
 │   ├── watch.md                 # /watch
-│   └── watch-mimo.md            # /watch-mimo  (NEW)
+│   └── watch-video.md           # /watch-video  (NEW)
 ├── scripts/
 │   ├── watch.py                 # + scene-change, timeline, cache wiring
 │   ├── download.py              # + on-disk URL cache
 │   ├── frames.py                # + extract_scene_change()
 │   ├── transcribe.py
 │   ├── whisper.py
-│   ├── setup.py                 # + MIMO_* env scaffolding
-│   └── watch-mimo.sh            # MiMo-V2.5 harness launcher  (NEW)
+│   ├── setup.py                 # + DEEPSEEK_* env scaffolding
+│   ├── lib/codex-models.deepseek.json
+│   └── watch-video.sh           # headless Codex + DeepSeek launcher
 ├── hooks/  ·  .claude-plugin/  ·  .codex-plugin/  ·  .github/workflows/
 ```
 
@@ -115,6 +113,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## License
 
-MIT — same as upstream. Built on `yt-dlp`, `ffmpeg`, Claude's multimodal `Read` tool, Whisper ([Groq](https://groq.com) / [OpenAI](https://openai.com)), and [MiMo-V2.5](https://mimo.xiaomi.com).
+MIT — same as upstream. Built on `yt-dlp`, `ffmpeg`, Claude's multimodal `Read` tool, Whisper ([Groq](https://groq.com) / [OpenAI](https://openai.com)), and [DeepSeek Vision](https://api-docs.deepseek.com/guides/vision).
 
 Original project: [github.com/bradautomates/claude-video](https://github.com/bradautomates/claude-video) · [LICENSE](LICENSE)

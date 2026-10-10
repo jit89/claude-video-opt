@@ -62,7 +62,7 @@ def main() -> int:
     ap.add_argument(
         "--no-cache",
         action="store_true",
-        help="Re-download even if the URL is already in the on-disk cache.",
+        help="Re-download even if the URL is already in the video library.",
     )
     ap.add_argument(
         "--probe",

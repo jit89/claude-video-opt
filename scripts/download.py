@@ -6,14 +6,15 @@ transcribe.py can parse them without needing Whisper.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import library  # noqa: E402
 
 
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".flv", ".wmv"}
@@ -22,18 +23,6 @@ VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".flv", ".wmv"}
 # treat a cache entry as a hit when this exists, so an interrupted/partial
 # download is never served from cache.
 CACHE_COMPLETE_MARKER = ".complete"
-
-
-def _cache_root() -> Path:
-    override = os.environ.get("WATCH_CACHE_DIR")
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / ".cache" / "watch" / "downloads"
-
-
-def _cache_dir_for(url: str) -> Path:
-    key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-    return _cache_root() / key
 
 
 def is_url(source: str) -> bool:
@@ -105,29 +94,56 @@ def _result_from_dir(out_dir: Path, url: str) -> dict:
     }
 
 
-def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
-    # Check the cache before anything else — a cache hit must not require yt-dlp
-    # to be installed, since the whole point is to skip the download.
-    cache_dir: Path | None = None
-    if use_cache:
-        cache_dir = _cache_dir_for(url)
-        if (cache_dir / CACHE_COMPLETE_MARKER).exists() and _pick_video(cache_dir):
-            print(f"[watch] cache hit — reusing {cache_dir}", file=sys.stderr)
-            return _result_from_dir(cache_dir, url)
-        # Download straight into the cache location so it persists for next time.
-        out_dir = cache_dir
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
 
-    if shutil.which("yt-dlp") is None:
-        raise SystemExit("yt-dlp is not installed. Install with: brew install yt-dlp")
+
+def _venv_yt_dlp() -> Path:
+    """yt-dlp from the project venv (curl_cffi lives there). Never system/brew PATH."""
+    return _repo_root() / ".venv" / "bin" / "yt-dlp"
+
+
+def yt_dlp_bin() -> str:
+    venv = _venv_yt_dlp()
+    if venv.is_file() and os.access(venv, os.X_OK):
+        return str(venv)
+    raise SystemExit(
+        f"yt-dlp not found at {venv}. "
+        f"Create the project venv (does not touch system Python): "
+        f"{_repo_root() / 'scripts' / 'ensure-venv.sh'}"
+    )
+
+
+def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
+    # Every URL download lands in the dated library folder
+    # (~/Documents/claude-video-reports/<dd-mm-yyyy>/<slug>/). Check for an
+    # existing copy first — a hit must not require yt-dlp to be installed.
+    cache_dir = library.video_dir(url, reuse=use_cache)
+    if use_cache and (cache_dir / CACHE_COMPLETE_MARKER).exists() and _pick_video(cache_dir):
+        print(f"[watch] library hit — reusing {cache_dir}", file=sys.stderr)
+        return _result_from_dir(cache_dir, url)
+    (cache_dir / CACHE_COMPLETE_MARKER).unlink(missing_ok=True)
+    out_dir = cache_dir
+    print(f"[watch] downloading into {out_dir}", file=sys.stderr)
+
+    ytdlp = yt_dlp_bin()
 
     out_dir.mkdir(parents=True, exist_ok=True)
     output_template = str(out_dir / "video.%(ext)s")
 
+    impersonate = os.environ.get("WATCH_YTDLP_IMPERSONATE", "chrome").strip() or "chrome"
+    print(f"[watch] yt-dlp={ytdlp} impersonate={impersonate}", file=sys.stderr)
+
     cmd = [
-        "yt-dlp",
+        ytdlp,
         "-N", "8",
         "-f", "bv*[height<=720]+ba/b[height<=720]/bv+ba/b",
         "--merge-output-format", "mp4",
+        # curl_cffi Chrome impersonation so the web client can see DASH 720p
+        # instead of SABR-only android/ios progressive 360p.
+        "--impersonate", impersonate,
+        # Do not pin android/ios/web: those clients are SABR-only (360p
+        # progressive). Default clients + Chrome impersonation expose DASH ≤720p.
         "--write-info-json",
         "--write-subs",
         "--write-auto-subs",
@@ -152,8 +168,7 @@ def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
 
     # Mark the cache entry complete only after a video file is confirmed present,
     # so a partial download is never served on a later run.
-    if cache_dir is not None:
-        (cache_dir / CACHE_COMPLETE_MARKER).write_text("ok", encoding="utf-8")
+    (cache_dir / CACHE_COMPLETE_MARKER).write_text("ok", encoding="utf-8")
 
     return _result_from_dir(out_dir, url)
 
