@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Where a video and its reports live on disk.
 
-Layout:  <root>/<dd-mm-yyyy>/<slug>/
+Layout:  <root>/<yyyy-mm-dd>/<slug>/
            video.mp4, video.*.vtt, video.info.json, .complete, .source
            report.md (report-2.md, ... on later runs)
 
 <root> is ~/Documents/claude-video-reports (override: $WATCH_LIBRARY_DIR, or
-the older $WATCH_CACHE_DIR). <dd-mm-yyyy> is the date the video was first
+the older $WATCH_CACHE_DIR). <yyyy-mm-dd> is the date the video was first
 downloaded ($WATCH_DATE overrides "today"; watch-video.sh sets it). A video
 already in the library under any date is reused from that folder rather than
 downloaded again.
@@ -17,6 +17,7 @@ CLI:  library.py dir <source>      print the folder for <source> (creates it)
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import sys
@@ -36,7 +37,7 @@ def root() -> Path:
 
 
 def today() -> str:
-    return os.environ.get("WATCH_DATE") or date.today().strftime("%d-%m-%Y")
+    return os.environ.get("WATCH_DATE") or date.today().isoformat()
 
 
 def _is_url(source: str) -> bool:
@@ -101,12 +102,11 @@ def find_existing(source: str) -> Path | None:
     return None
 
 
-def video_dir(source: str, reuse: bool = True) -> Path:
+def video_dir(source: str) -> Path:
     """Existing folder for this source, else a new one under today's date."""
-    if reuse:
-        hit = find_existing(source)
-        if hit is not None:
-            return hit
+    hit = find_existing(source)
+    if hit is not None:
+        return hit
     key = source_key(source)
     day = root() / today()
     name = slug(source)
@@ -129,6 +129,61 @@ def report_path(source: str) -> Path:
         p = d / f"report-{n}.md"
         n += 1
     return p
+
+
+VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".flv", ".wmv"}
+
+
+def metadata(source: str) -> dict:
+    """Title, channel, duration, etc. from the library's video.info.json."""
+    d = find_existing(source)
+    raw: dict = {}
+    if d is not None and (d / "video.info.json").is_file():
+        try:
+            raw = json.loads((d / "video.info.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+    up = raw.get("upload_date") or ""
+    return {
+        "title": raw.get("title") or (Path(source).name if not _is_url(source) else None),
+        "channel": raw.get("channel") or raw.get("uploader"),
+        "url": raw.get("webpage_url") or source,
+        "video_id": raw.get("id") or slug(source),
+        "duration": raw.get("duration"),
+        "uploaded": f"{up[:4]}-{up[4:6]}-{up[6:8]}" if len(up) == 8 else None,
+        "tags": [str(x) for x in (raw.get("tags") or [])][:10],
+    }
+
+
+def frontmatter(fields: dict) -> str:
+    """YAML frontmatter; values are JSON-encoded, which YAML reads as-is."""
+    lines = ["---"]
+    for k, v in fields.items():
+        if v is None or v == []:
+            continue
+        lines.append(f"{k}: {json.dumps(v, ensure_ascii=False)}")
+    lines.append("---")
+    return "\n".join(lines) + "\n\n"
+
+
+def drop_video(source: str) -> Path | None:
+    """Delete the downloaded video file, keeping subtitles, metadata and reports.
+
+    Only for URL downloads; a local source file is never touched. A later run
+    re-downloads into the same folder.
+    """
+    if not _is_url(source):
+        return None
+    d = find_existing(source)
+    if d is None:
+        return None
+    removed = None
+    for f in d.glob("video.*"):
+        if f.suffix.lower() in VIDEO_EXTS:
+            f.unlink()
+            removed = f
+    (d / ".complete").unlink(missing_ok=True)
+    return removed
 
 
 if __name__ == "__main__":

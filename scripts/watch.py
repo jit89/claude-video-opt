@@ -82,7 +82,7 @@ def main() -> int:
     print(f"[watch] working dir: {work}", file=sys.stderr)
 
     print(
-        "[watch] downloading via yt-dlp…" if is_url(args.source) else "[watch] using local file…",
+        "[watch] fetching video (library or yt-dlp)…" if is_url(args.source) else "[watch] using local file…",
         file=sys.stderr,
     )
     dl = download(args.source, work / "download", use_cache=not args.no_cache)

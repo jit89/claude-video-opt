@@ -23,10 +23,10 @@ Instead of sampling one frame every *N* seconds, the default full-video pass now
 The report now interleaves **frames and transcript lines in chronological order**, so the agent sees what's on screen *as each line is spoken* (frame markers `F` and transcript lines `»`, merged by timestamp). The plain `## Frames` path list is still there for the Read tool.
 
 ### 3. Dated video library (`scripts/library.py`, `scripts/download.py`)
-URL downloads land in `~/Documents/claude-video-reports/<dd-mm-yyyy>/<video-id>/` (dated by the day of first download; override the root with `$WATCH_LIBRARY_DIR`), and the harness writes `report.md` into the same folder. A video already in the library is **reused on later runs** — video, subtitles, and metadata. A `.complete` sentinel prevents serving partial downloads, and cache hits don't even require `yt-dlp` installed. Force a fresh download with `--no-cache`.
+Each video gets one folder: `~/Documents/claude-video-reports/<yyyy-mm-dd>/<video-id>/`, dated by the day it was first downloaded (override the root with `$WATCH_LIBRARY_DIR`). The video, subtitles, metadata and every report about it live together there. A video already in the library is **reused on later runs** (YouTube `?t=`, `?si=`, `/shorts/` and `youtu.be` links share one folder). A `.complete` sentinel prevents serving partial downloads, and library hits don't need `yt-dlp`. Force a fresh download with `--no-cache`; delete the video after the report with `--drop-video`.
 
-### 4. Watch with **DeepSeek inside Codex** — `/watch-video` (`scripts/watch-video.sh`)
-The headline feature. A **headless Codex** process (`codex exec`), pointed at DeepSeek, drives `watch.py`, views the extracted JPEGs, and writes the report. Isolated `CODEX_HOME` at `~/.cache/watch-video/codex` — interactive Codex/ChatGPT is untouched. Long videos are still split into 10-minute windows. Claude Code is not used.
+### 4. Watch with **DeepSeek Vision** — `/watch-video` (`scripts/watch-video.sh`)
+`watch_vision.py` runs `watch.py`, sends the JPEGs plus the time-aligned transcript to DeepSeek's vision model as native image content, and writes `report.md` next to the video. Long videos are split into 10-minute windows with a final cross-window summary. Each report starts with YAML frontmatter (title, source, channel, duration, uploaded, watched, model, question, tags) so reports can be indexed later.
 
 ---
 
@@ -40,72 +40,65 @@ Unchanged from upstream:
 ```
 New knobs on `scripts/watch.py`: `--no-scene-change`, `--no-cache` (the others — `--start`/`--end`, `--resolution`, `--max-frames`, `--fps`, `--whisper`, `--no-whisper` — are documented upstream).
 
-### New flow — DeepSeek watches via Codex (`/watch-video`)
+### New flow — DeepSeek watches (`/watch-video`)
 ```
 /watch-video https://youtu.be/abc "Detailed report; extract any on-screen code verbatim"
 ```
-Or run the launcher directly. Just a source and a question works (no flags needed):
+Or run the launcher directly:
 ```bash
-# Minimal — source + question, no trailing flags:
 ./scripts/watch-video.sh "<url-or-path>" "your question"
-
-# Clean up frames afterward, and forward extra watch.py flags after `--`:
-./scripts/watch-video.sh "<url-or-path>" "your question" --cleanup -- --resolution 1024 --start 1:00 --end 2:00
+./scripts/watch-video.sh "<url-or-path>" "your question" --cleanup --drop-video -- --resolution 1024 --start 1:00 --end 2:00
 ```
-- Both forms work; the `--` is only needed when you pass extra `watch.py` flags.
-- `--cleanup` removes the extracted-frames working dir after the report is written (the downloaded video stays cached).
-- Pass `--resolution 1024` when you want on-screen code/text read accurately.
-- The report is written to the **current directory** as `watch-analysis.md` (override with `$WATCH_ANALYSIS_OUT`).
-- Requires Codex CLI ≥ 0.144 on `PATH` (or `$CODEX_BIN`).
-
-**Long videos are windowed automatically.** Past 10 minutes (configurable via `$WATCH_WINDOW_SECONDS`), the harness splits the video into 10-minute windows — Codex/DeepSeek appends per-window findings to the report as durable working memory. Explicit `--start`/`--end` ranges skip windowing.
+- The launcher checks today's date first, so new downloads land in today's folder.
+- `--cleanup` removes the extracted frames; `--drop-video` deletes the downloaded video (or set `WATCH_DROP_VIDEO=1`). Subtitles, metadata and reports stay.
+- Everything after `--` goes to `watch.py`. Pass `--resolution 1024` to read on-screen code accurately.
+- Transient errors (rate-limit / overload) are retried per request (`$WATCH_VISION_MAX_RETRIES`, default 2).
 
 ### DeepSeek configuration (`~/.config/watch/.env`)
 | Var | Value |
 |-----|-------|
-| `DEEPSEEK_API_KEY` | **Required** unless already set in the environment or `~/grok-coding-workflow/.env`. [platform.deepseek.com](https://platform.deepseek.com/api_keys). |
-| `DEEPSEEK_BASE_URL` | Default `https://api.deepseek.com/`. |
-| `DEEPSEEK_MODEL` | Default `deepseek-v4-flash`. `DEEPSEEK_VISION_MODEL` is accepted as an alias. |
+| `DEEPSEEK_API_KEY` | **Required.** [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
+| `DEEPSEEK_BASE_URL` | Default `https://api.deepseek.com` |
+| `DEEPSEEK_VISION_MODEL` | Default `deepseek-v4-flash-vision-exp` |
 
-`scripts/setup.py` scaffolds these placeholders into the `.env` alongside the Whisper keys. Isolated Codex state lives at `~/.cache/watch-video/codex` and does **not** rewrite `~/.codex/config.toml`.
-
----
-
-## Does `/watch-video` have a fallback?
-
-Yes — two layers:
-
-1. **Transient retry in the launcher.** `watch-video.sh` retries on rate-limit / overload with a short backoff (configurable via `$WATCH_VIDEO_MAX_RETRIES`), then exits with a clean non-zero code if it still can't complete.
-2. **Fall back to the host agent.** If the harness ultimately fails, `/watch-video` falls back to the **standard `/watch` flow** — it runs `watch.py` directly and lets the host (Grok) read the frames and answer. Because the download is already cached and `watch.py` is provider-independent, this fallback is fast and always available. Do not fall back to Claude Code.
+`scripts/setup.py` scaffolds these placeholders into the `.env` alongside the Whisper keys.
 
 ---
+
+## Install as a Claude Code plugin
+
+Python dependencies live in a project venv built by uv on a uv-managed Python; the system Python is never touched.
+
+```bash
+brew install ffmpeg uv
+./scripts/ensure-venv.sh                      # creates .venv (yt-dlp + curl_cffi)
+claude plugin marketplace add "$PWD"          # this folder is the marketplace
+claude plugin install watch@claude-video
+```
+A plugin added from a local folder is loaded in place, so edits to this repo apply in the next session. Inside Claude Code: `/watch:watch-video <url> [question]`, or just paste a video URL.
 
 ## What's unchanged (see upstream for details)
 
-Install, first-run setup, the frame-budget table, Whisper/Groq/OpenAI key setup, supported sites, the 25 MB Whisper limit, claude.ai/Codex packaging, and the `build-skill.sh` bundle — all behave exactly as in the **[original repo](https://github.com/bradautomates/claude-video#readme)**. Install the enhanced version as a plugin with:
-
-```
-/plugin marketplace add jit89/claude-video-opt
-/plugin install watch@claude-video
-```
+Install on other surfaces, first-run setup, the frame-budget table, Whisper/Groq/OpenAI key setup, supported sites, the 25 MB Whisper limit, and the `build-skill.sh` bundle all behave as in the **[original repo](https://github.com/bradautomates/claude-video#readme)**.
 
 ## Structure (additions in **bold**)
 
 ```
 .
-├── SKILL.md
-├── commands/
-│   ├── watch.md                 # /watch
-│   └── watch-video.md           # /watch-video  (NEW)
+├── SKILL.md                     # upstream /watch skill (claude.ai / standalone)
+├── skills/watch-video/SKILL.md  # /watch-video (plugin skill, NEW)
+├── commands/watch.md            # /watch
 ├── scripts/
-│   ├── watch.py                 # + scene-change, timeline, cache wiring
-│   ├── download.py              # + on-disk URL cache
+│   ├── watch.py                 # + scene-change, timeline, library wiring
+│   ├── download.py              # + dated library download
+│   ├── library.py               # dated folders, metadata, frontmatter (NEW)
 │   ├── frames.py                # + extract_scene_change()
 │   ├── transcribe.py
 │   ├── whisper.py
 │   ├── setup.py                 # + DEEPSEEK_* env scaffolding
-│   ├── lib/codex-models.deepseek.json
-│   └── watch-video.sh           # headless Codex + DeepSeek launcher
+│   ├── watch_vision.py          # DeepSeek vision harness (NEW)
+│   ├── watch-video.sh           # launcher: pins the date, runs the harness (NEW)
+│   └── ensure-venv.sh           # uv venv bootstrap (NEW)
 ├── hooks/  ·  .claude-plugin/  ·  .codex-plugin/  ·  .github/workflows/
 ```
 

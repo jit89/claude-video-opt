@@ -51,19 +51,12 @@ ENV_TEMPLATE = """# /watch API configuration
 GROQ_API_KEY=
 OPENAI_API_KEY=
 
-# DeepSeek via headless Codex — used by scripts/watch-video.sh.
-# Isolated CODEX_HOME; does not rewrite ~/.codex/config.toml.
-# Same key as the rest of the house if you already have one.
-#
+# DeepSeek Vision — used by scripts/watch-video.sh (watch_vision.py).
 # Get a key: https://platform.deepseek.com/api_keys
-#
-# Leave DEEPSEEK_API_KEY blank here if the key already lives in
-# ~/grok-coding-workflow/.env — the harness reads that as a fallback.
 
 DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com/
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_VISION_MODEL=deepseek-v4-flash
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_VISION_MODEL=deepseek-v4-flash-vision-exp
 """
 
 
@@ -157,12 +150,11 @@ def _scaffold_env() -> bool:
 
 
 DEEPSEEK_BLOCK = """
-# DeepSeek via headless Codex — scripts/watch-video.sh
+# DeepSeek Vision — scripts/watch-video.sh (watch_vision.py)
 # Get a key: https://platform.deepseek.com/api_keys
 DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com/
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_VISION_MODEL=deepseek-v4-flash
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_VISION_MODEL=deepseek-v4-flash-vision-exp
 """
 
 

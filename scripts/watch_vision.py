@@ -6,7 +6,11 @@ timeline to https://api.deepseek.com as native image content. Long videos
 are split into WATCH_WINDOW_SECONDS windows.
 
 Usage:
-  watch_vision.py <url-or-path> ["question"] [--cleanup] [-- extra watch.py flags]
+  watch_vision.py <url-or-path> ["question"] [--cleanup] [--drop-video] [-- extra watch.py flags]
+
+  --cleanup     remove extracted frames once the report is written
+  --drop-video  delete the downloaded video afterwards (keeps subtitles,
+                metadata and reports; also on via WATCH_DROP_VIDEO=1)
 """
 from __future__ import annotations
 
@@ -360,10 +364,16 @@ def extra_has_range(extra: list[str]) -> bool:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     cleanup = False
+    drop_video = os.environ.get("WATCH_DROP_VIDEO", "") in ("1", "true", "yes")
     kept: list[str] = []
-    for a in argv:
+    for i, a in enumerate(argv):
+        if a == "--":
+            kept.extend(argv[i:])
+            break
         if a == "--cleanup":
             cleanup = True
+        elif a == "--drop-video":
+            drop_video = True
         else:
             kept.append(a)
 
@@ -387,6 +397,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     args = p.parse_args(kept)
     args.cleanup = cleanup
+    args.drop_video = drop_video
     args.extra = extra
     return args
 
@@ -397,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     base = load_var("DEEPSEEK_BASE_URL", DEFAULT_BASE)
     model = load_var("DEEPSEEK_VISION_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL
     # Default: next to the downloaded video, in
-    # ~/Documents/claude-video-reports/<dd-mm-yyyy>/<slug>/report.md
+    # ~/Documents/claude-video-reports/<yyyy-mm-dd>/<slug>/report.md
     # Pin the date once so watch.py subprocesses use the same dated folder.
     os.environ.setdefault("WATCH_DATE", library.today())
     out_override = os.environ.get("WATCH_ANALYSIS_OUT")
@@ -416,6 +427,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         focused = extra_has_range(extra)
         dur = None if focused else probe_duration(args.source, extra, work)
+        if dur is not None:
+            # The probe already did any forced re-download; don't repeat it
+            # for every window.
+            extra = [a for a in extra if a != "--no-cache"]
         windows: list[tuple[int | None, int | None, Path, str]]
         if dur is not None and dur > window:
             n = 0
@@ -487,6 +502,31 @@ def main(argv: list[str] | None = None) -> int:
                 max_retries=max_retries,
             )
             append_report(out_file, f"## Summary\n\n{summary}\n")
+
+        # Prepend YAML frontmatter now that the download (and its metadata)
+        # exists, so reports can be indexed into a knowledge base later.
+        meta = library.metadata(args.source)
+        fields = {
+            "title": meta["title"],
+            "source": meta["url"],
+            "video_id": meta["video_id"],
+            "channel": meta["channel"],
+            "duration": fmt_mmss(int(meta["duration"])) if meta["duration"] else None,
+            "uploaded": meta["uploaded"],
+            "watched": os.environ["WATCH_DATE"],
+            "model": model,
+            "question": args.question,
+            "tags": meta["tags"],
+        }
+        body = out_file.read_text(encoding="utf-8")
+        if meta["title"]:
+            body = body.replace("# Watch report", f"# {meta['title']}", 1)
+        out_file.write_text(library.frontmatter(fields) + body, encoding="utf-8")
+
+        if args.drop_video:
+            removed = library.drop_video(args.source)
+            if removed:
+                print(f"[watch-vision] deleted video: {removed}", file=sys.stderr)
 
         print(str(out_file))
         return 0

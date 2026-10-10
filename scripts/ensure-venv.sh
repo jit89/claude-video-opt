@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="$ROOT/.venv"
 REQ="$ROOT/requirements.txt"
-PY_VERSION="${WATCH_VENV_PYTHON:-3.12}"
+PY_VERSION="${WATCH_VENV_PYTHON:-3.14}"
 
 UV="$(command -v uv || true)"
 [[ -z "$UV" && -x /opt/homebrew/bin/uv ]] && UV=/opt/homebrew/bin/uv
@@ -21,8 +21,12 @@ fi
 echo "[venv] uv=${UV} python=${PY_VERSION} (uv-managed)" >&2
 echo "[venv] target=${VENV}" >&2
 
-if [[ ! -x "$VENV/bin/python" ]]; then
-  "$UV" venv --managed-python --python "$PY_VERSION" "$VENV"
+# Rebuild when the venv is missing or on a different Python minor version.
+HAVE=""
+[[ -x "$VENV/bin/python" ]] && HAVE="$("$VENV/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+if [[ "$HAVE" != "$PY_VERSION" ]]; then
+  [[ -n "$HAVE" ]] && echo "[venv] rebuilding: have Python ${HAVE}, want ${PY_VERSION}" >&2
+  "$UV" venv --clear --managed-python --python "$PY_VERSION" "$VENV"
 fi
 
 "$UV" pip install --python "$VENV/bin/python" -r "$REQ"

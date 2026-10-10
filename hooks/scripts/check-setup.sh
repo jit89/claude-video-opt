@@ -34,25 +34,28 @@ read_key() {
   fi
 }
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 HAS_FFMPEG=""
 HAS_YTDLP=""
-command -v ffmpeg >/dev/null 2>&1 && HAS_FFMPEG="yes"
-command -v yt-dlp >/dev/null 2>&1 && HAS_YTDLP="yes"
+{ command -v ffmpeg || ls /opt/homebrew/bin/ffmpeg; } >/dev/null 2>&1 && HAS_FFMPEG="yes"
+# yt-dlp lives in the project venv (with curl_cffi), never on the system PATH.
+[[ -x "$ROOT/.venv/bin/yt-dlp" ]] && HAS_YTDLP="yes"
 
-HAS_GROQ="$(read_key GROQ_API_KEY)"
-HAS_OPENAI="$(read_key OPENAI_API_KEY)"
-SETUP_COMPLETE="$(read_key SETUP_COMPLETE)"
+HAS_DEEPSEEK="$(read_key DEEPSEEK_API_KEY)"
 
-# Fully configured → silent (Claude can surface status on demand via --check).
-if [[ "$SETUP_COMPLETE" == "true" && -n "$HAS_FFMPEG" && -n "$HAS_YTDLP" ]]; then
+# Ready → silent. Whisper keys are optional (captions cover most videos), so
+# their absence is not worth a message every session.
+if [[ -n "$HAS_FFMPEG" && -n "$HAS_YTDLP" && -n "$HAS_DEEPSEEK" ]]; then
   exit 0
 fi
 
-# First-run / partially-configured → one-line hint.
-if [[ -z "$HAS_FFMPEG" || -z "$HAS_YTDLP" ]]; then
-  echo "/watch: needs ffmpeg + yt-dlp. Run \`python3 \$CLAUDE_PLUGIN_ROOT/scripts/setup.py\` once to install and scaffold config."
-elif [[ -z "$HAS_GROQ" && -z "$HAS_OPENAI" ]]; then
-  echo "/watch: ready for videos with native captions. Add GROQ_API_KEY (preferred) or OPENAI_API_KEY to ~/.config/watch/.env to unlock Whisper fallback."
-else
-  echo "/watch: ready."
+if [[ -z "$HAS_FFMPEG" ]]; then
+  echo "/watch: needs ffmpeg. Install with: brew install ffmpeg"
+fi
+if [[ -z "$HAS_YTDLP" ]]; then
+  echo "/watch: needs the project venv (yt-dlp). Run: \"$ROOT/scripts/ensure-venv.sh\" (uses uv; never touches system Python)"
+fi
+if [[ -z "$HAS_DEEPSEEK" ]]; then
+  echo "/watch: /watch-video needs DEEPSEEK_API_KEY in $CONFIG_FILE (https://platform.deepseek.com/api_keys)."
 fi

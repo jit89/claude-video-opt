@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import library  # noqa: E402
 
 
-VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".flv", ".wmv"}
+VIDEO_EXTS = library.VIDEO_EXTS
 
 # Sentinel written into a cache dir once a download finishes cleanly. We only
 # treat a cache entry as a hit when this exists, so an interrupted/partial
@@ -116,9 +116,11 @@ def yt_dlp_bin() -> str:
 
 def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
     # Every URL download lands in the dated library folder
-    # (~/Documents/claude-video-reports/<dd-mm-yyyy>/<slug>/). Check for an
+    # (~/Documents/claude-video-reports/<yyyy-mm-dd>/<slug>/). Check for an
     # existing copy first — a hit must not require yt-dlp to be installed.
-    cache_dir = library.video_dir(url, reuse=use_cache)
+    # --no-cache (use_cache=False) re-downloads in place, in the same folder
+    # the report goes to, rather than starting a second folder under today.
+    cache_dir = library.video_dir(url)
     if use_cache and (cache_dir / CACHE_COMPLETE_MARKER).exists() and _pick_video(cache_dir):
         print(f"[watch] library hit — reusing {cache_dir}", file=sys.stderr)
         return _result_from_dir(cache_dir, url)
@@ -156,6 +158,9 @@ def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
         "--",
         url,
     ]
+    if not use_cache:
+        # Re-download in place: replace the files already in this folder.
+        cmd[1:1] = ["--force-overwrites"]
 
     # yt-dlp may exit non-zero if a subtitle variant fails (e.g. 429) even when
     # the video itself downloaded fine. Treat "video file present" as success.
