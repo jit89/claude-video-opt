@@ -45,6 +45,8 @@ DEFAULT_QUESTION = (
     "timestamps, and the overall topic."
 )
 DEFAULT_WINDOW = 600
+DEFAULT_OVERLAP = 30
+MIN_TAIL = 60  # a last window shorter than this is merged into the previous one
 # Raw JPEG budget so base64 + JSON stay under DeepSeek's 48 MiB body limit.
 MAX_RAW_BYTES = 18 * 1024 * 1024
 MAX_IMAGES = 80
@@ -278,10 +280,12 @@ def analyze_batch(
     batch: list[tuple[str, str]],
     max_retries: int,
     part: str = "",
+    context_note: str = "",
 ) -> str:
     text_parts = [
         "You are analyzing frames from a video plus its time-aligned transcript.",
         f"Section: {heading}{part}.",
+        *([context_note] if context_note else []),
         "Each image is labeled with its absolute timestamp t=MM:SS.",
         "Cite timestamps. Quote on-screen or spoken code/commands verbatim in fenced blocks.",
         "",
@@ -329,6 +333,7 @@ def analyze_slice(
     heading: str,
     report_text: str,
     max_retries: int,
+    context_note: str = "",
 ) -> str:
     frames, timeline = parse_watch_report(report_text)
     batches = pack_batches(frames)
@@ -347,6 +352,7 @@ def analyze_slice(
                 batch=batch,
                 max_retries=max_retries,
                 part=part,
+                context_note=context_note,
             )
         )
     if len(chunks) == 1:
@@ -448,6 +454,26 @@ def append_report(path: Path, text: str) -> None:
     path.write_text(existing + text + ("\n" if not text.endswith("\n") else ""), encoding="utf-8")
 
 
+def plan_windows(dur: int, window: int, overlap: int) -> list[tuple[int, int, int, str]]:
+    """Split [0, dur) into windows: (extract_from, start, end, heading).
+
+    Each window after the first is extracted from `overlap` seconds before its
+    start, so a topic cut by the boundary is visible to the next window. The
+    overlap is clamped to [0, window // 4]. A final stretch shorter than
+    MIN_TAIL is folded into the previous window instead of becoming its own.
+    """
+    overlap = max(0, min(overlap, window // 4))
+    out: list[tuple[int, int, int, str]] = []
+    s = 0
+    while s < dur:
+        e = min(s + window, dur)
+        if dur - e < MIN_TAIL:
+            e = dur
+        out.append((max(0, s - overlap) if s else 0, s, e, f"{fmt_mmss(s)}–{fmt_mmss(e)}"))
+        s = e
+    return out
+
+
 def extra_has_range(extra: list[str]) -> bool:
     return "--start" in extra or "--end" in extra
 
@@ -508,7 +534,8 @@ def main(argv: list[str] | None = None) -> int:
     out_file = (
         Path(out_override).expanduser() if out_override else library.report_path(args.source)
     )
-    window = int(os.environ.get("WATCH_WINDOW_SECONDS") or DEFAULT_WINDOW)
+    window = max(60, int(os.environ.get("WATCH_WINDOW_SECONDS") or DEFAULT_WINDOW))
+    overlap = int(os.environ.get("WATCH_WINDOW_OVERLAP") or DEFAULT_OVERLAP)
     max_retries = int(os.environ.get("WATCH_VISION_MAX_RETRIES") or "2")
     extra = list(args.extra)
 
@@ -524,23 +551,19 @@ def main(argv: list[str] | None = None) -> int:
             # The probe already did any forced re-download; don't repeat it
             # for every window.
             extra = [a for a in extra if a != "--no-cache"]
-        windows: list[tuple[int | None, int | None, Path, str]]
+        # (extract_from, start, end, out_dir, heading). extract_from < start
+        # when the window has a lead-in overlap with the previous one.
+        windows: list[tuple[int | None, int | None, int | None, Path, str]]
         if dur is not None and dur > window:
-            n = 0
-            s = 0
-            windows = []
-            while s < dur:
-                e = min(s + window, dur)
-                heading = f"{fmt_mmss(s)}–{fmt_mmss(e)}"
-                windows.append((s, e, work / f"win_{n}", heading))
-                s = e
-                n += 1
+            windows = plan_windows(dur, window, overlap)
+            windows = [(a, s, e, work / f"win_{i}", h) for i, (a, s, e, h) in enumerate(windows)]
             print(
-                f"[watch-vision] long video ({dur}s) → {n} window(s) of {window}s",
+                f"[watch-vision] long video ({dur}s) → {len(windows)} window(s) of "
+                f"{window}s, {overlap}s overlap",
                 file=sys.stderr,
             )
         else:
-            windows = [(None, None, work / "full", "full")]
+            windows = [(None, None, None, work / "full", "full")]
 
         header = [
             "# Watch report",
@@ -553,18 +576,27 @@ def main(argv: list[str] | None = None) -> int:
         out_file.write_text("\n".join(header), encoding="utf-8")
 
         window_notes: list[str] = []
-        for start, end, out_dir, heading in windows:
+        for extract_from, start, end, out_dir, heading in windows:
             flags = list(extra)
+            context_note = ""
             if start is not None and end is not None:
                 flags.extend(
                     [
                         "--start",
-                        str(start),
+                        str(extract_from),
                         "--end",
                         str(end),
                         "--scene-change",
                     ]
                 )
+                if extract_from < start:
+                    context_note = (
+                        f"Frames and transcript from {fmt_mmss(extract_from)} to "
+                        f"{fmt_mmss(start)} overlap the end of the previous section and are "
+                        "context only: use them to understand or finish a topic that started "
+                        "there, but do not describe that stretch again on its own. Report "
+                        f"this section from {fmt_mmss(start)} onwards."
+                    )
             report = run_watch(args.source, flags, out_dir)
             body = analyze_slice(
                 key=key,
@@ -574,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
                 heading=heading,
                 report_text=report,
                 max_retries=max_retries,
+                context_note=context_note,
             )
             body = nest_headings(body)
             section = f"## [{heading}]\n\n{body}\n"

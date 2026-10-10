@@ -56,6 +56,7 @@ touches system Python).
 | `WATCH_LIBRARY_DIR` | `~/Documents/claude-video-reports` | library root |
 | `WATCH_ANALYSIS_OUT` | `report.md` next to the video | leave unset |
 | `WATCH_WINDOW_SECONDS` | `600` | window size for long videos |
+| `WATCH_WINDOW_OVERLAP` | `30` | seconds each window re-reads before its start (capped at a quarter window) |
 | `WATCH_VISION_MAX_RETRIES` | `2` | per-request retries |
 | `WATCH_DROP_VIDEO` | unset | `1` (in the env or `~/.config/watch/.env`) = delete the video after every report |
 
@@ -118,7 +119,10 @@ Use `run_in_background: true`.
   `--start 1:00 --end 2:00`, `--max-frames 40`, `--no-cache`, `--no-whisper`.
 - Long videos are windowed automatically into `WATCH_WINDOW_SECONDS` passes,
   each with its own dense frame budget, appended to the report as they finish;
-  a final `## Summary` section synthesizes across windows.
+  a final `## Summary` section synthesizes across windows. Each window also
+  sees the last `WATCH_WINDOW_OVERLAP` seconds of the previous one, so a topic
+  split by a boundary is finished rather than cut off; a final stretch under
+  a minute is folded into the previous window.
 - A `--start`/`--end` range skips windowing and densifies frames for that
   slice.
 - Tell the user the job started and where the report will land, then get on

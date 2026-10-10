@@ -15,6 +15,7 @@ All notable changes to `/watch` are documented here.
 
 ### Added
 - Library index `~/Documents/claude-video-reports/INDEX.md`, rebuilt from report frontmatter after every `/watch-video` run (`scripts/library.py index` by hand). Reports gain `summary` and `topics` fields from one extra short text call; a failed call never fails the run.
+- Windows overlap: each one after the first is extracted from `WATCH_WINDOW_OVERLAP` seconds (default 30, max a quarter window) before its start, and the model is told that stretch is context for finishing a topic, not to re-describe. A final stretch under 60 s is merged into the previous window instead of becoming its own tiny window.
 - Window notes are nested under their `## [MM:SS–MM:SS]` heading (the model's own `#`/`##` headings shift down, code blocks untouched); the cross-window summary is capped at ~1,000 words instead of restating every window.
 - `video.info.json` trimmed to ~20 useful fields after download (was ~10 MB of format/caption URLs on long videos); older entries are trimmed on their next library hit.
 - `WATCH_DROP_VIDEO=1` is read from `~/.config/watch/.env` too, making `--drop-video` a per-machine default; `--keep-video` overrides it for one run.
