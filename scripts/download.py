@@ -94,6 +94,33 @@ def _result_from_dir(out_dir: Path, url: str) -> dict:
     }
 
 
+# Fields kept in video.info.json. yt-dlp's full dump is mostly format and
+# caption URLs (~10 MB for a long video); these are what the library, the
+# report header and later recall use.
+INFO_KEEP = (
+    "id", "title", "fulltitle", "channel", "channel_id", "channel_url", "uploader",
+    "uploader_id", "webpage_url", "original_url", "extractor_key", "duration",
+    "upload_date", "timestamp", "release_date", "language", "tags", "categories",
+    "description", "chapters", "view_count", "like_count", "comment_count",
+)
+INFO_TRIM_OVER_BYTES = 256 * 1024
+
+
+def _trim_info_json(out_dir: Path) -> None:
+    """Rewrite video.info.json with only INFO_KEEP fields (atomic, best-effort)."""
+    path = out_dir / "video.info.json"
+    try:
+        if not path.is_file() or path.stat().st_size <= INFO_TRIM_OVER_BYTES:
+            return
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        slim = {k: raw[k] for k in INFO_KEEP if k in raw}
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(slim, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(path)
+    except (OSError, ValueError) as exc:
+        print(f"[watch] info.json not trimmed: {exc}", file=sys.stderr)
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -123,6 +150,7 @@ def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
     cache_dir = library.video_dir(url)
     if use_cache and (cache_dir / CACHE_COMPLETE_MARKER).exists() and _pick_video(cache_dir):
         print(f"[watch] library hit — reusing {cache_dir}", file=sys.stderr)
+        _trim_info_json(cache_dir)  # entries downloaded before trimming existed
         return _result_from_dir(cache_dir, url)
     (cache_dir / CACHE_COMPLETE_MARKER).unlink(missing_ok=True)
     out_dir = cache_dir
@@ -173,6 +201,7 @@ def download_url(url: str, out_dir: Path, use_cache: bool = True) -> dict:
 
     # Mark the cache entry complete only after a video file is confirmed present,
     # so a partial download is never served on a later run.
+    _trim_info_json(out_dir)
     (cache_dir / CACHE_COMPLETE_MARKER).write_text("ok", encoding="utf-8")
 
     return _result_from_dir(out_dir, url)

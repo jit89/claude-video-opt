@@ -15,6 +15,10 @@ All notable changes to `/watch` are documented here.
 
 ### Added
 - Library index `~/Documents/claude-video-reports/INDEX.md`, rebuilt from report frontmatter after every `/watch-video` run (`scripts/library.py index` by hand). Reports gain `summary` and `topics` fields from one extra short text call; a failed call never fails the run.
+- Window notes are nested under their `## [MM:SS–MM:SS]` heading (the model's own `#`/`##` headings shift down, code blocks untouched); the cross-window summary is capped at ~1,000 words instead of restating every window.
+- `video.info.json` trimmed to ~20 useful fields after download (was ~10 MB of format/caption URLs on long videos); older entries are trimmed on their next library hit.
+- `WATCH_DROP_VIDEO=1` is read from `~/.config/watch/.env` too, making `--drop-video` a per-machine default; `--keep-video` overrides it for one run.
+- `/watch:recall` reads large reports by section (frontmatter, `## Summary`, then only relevant windows) instead of whole.
 - `/watch:recall <question>` skill: Haiku triages the index, grep finds literal terms, then only the matching reports are read.
 - Scene-change frame extraction in `scripts/frames.py` — `extract_scene_change()` uses ffmpeg's `select=gt(scene,0.3)` filter to emit one frame per detected shot instead of uniform every-N-seconds sampling, keeping token cost flat on long videos. Always emits frame 0 (the scene filter only fires on *changes*). Falls back to uniform sampling when fewer than 10 scenes are detected (static/screen-recorded sources). Adapted from [taoufik123-collab/claude-watch](https://github.com/taoufik123-collab/claude-watch) v0.2.0.
 - `--no-scene-change` flag on `scripts/watch.py` to force uniform sampling.

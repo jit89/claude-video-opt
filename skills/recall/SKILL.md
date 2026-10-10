@@ -61,9 +61,16 @@ purely thematic questions.
 ## 3. Read and answer
 
 1. Merge the candidates: Haiku's picks (paths are relative to the library
-   dir) plus any report the grep hit. Read
-   those reports (all of each, they are short), at most ~6. If both came back
-   empty, read `INDEX.md` yourself once before concluding nothing matches.
+   dir) plus any report the grep hit, at most ~6. If both came back empty,
+   read `INDEX.md` yourself once before concluding nothing matches.
+   Reports vary a lot in size: a short clip is a few KB, a long video is
+   split into 10-minute `## [MM:SS–MM:SS]` window sections and can pass
+   100 KB. So check size first (`wc -c <report>`):
+   - **Under ~40 KB** → read the whole report.
+   - **Larger** → list its sections with
+     `grep -n '^## ' <report>`, read the frontmatter and the final
+     `## Summary`, then only the windows the question or a grep hit points
+     to (Read with `offset`/`limit`).
 2. Answer the question directly. For each claim, cite the video title, the
    `[MM:SS]` timestamp from the report when there is one, and the report path.
    Quote code or commands verbatim in fenced blocks.

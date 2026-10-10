@@ -57,7 +57,7 @@ touches system Python).
 | `WATCH_ANALYSIS_OUT` | `report.md` next to the video | leave unset |
 | `WATCH_WINDOW_SECONDS` | `600` | window size for long videos |
 | `WATCH_VISION_MAX_RETRIES` | `2` | per-request retries |
-| `WATCH_DROP_VIDEO` | unset | `1` = always delete the video after the report |
+| `WATCH_DROP_VIDEO` | unset | `1` (in the env or `~/.config/watch/.env`) = delete the video after every report |
 
 Frames are batched to stay under DeepSeek's body limit: max 80 images or
 ~18 MB of raw JPEG per request, whichever comes first.
@@ -109,8 +109,10 @@ Use `run_in_background: true`.
   (`~/Documents/claude-video-reports/INDEX.md`) that `/watch:recall` searches.
 - `--cleanup` removes the extracted frames once the report is written. Prefer
   it — you are never going to read those JPEGs.
-- `--drop-video` also deletes the downloaded video afterwards (subtitles,
-  metadata and reports stay). Use it when the user wants to save disk space.
+- `--drop-video` deletes the downloaded video afterwards (subtitles,
+  metadata and reports stay). It is the default when `WATCH_DROP_VIDEO=1` is
+  set in `~/.config/watch/.env`; pass `--keep-video` (before the `--`) when the
+  user wants this video kept.
 - **Everything after `--` is passed through to `watch.py`**: `--resolution
   1024` (keep this; on-screen code is unreadable at the 512px default),
   `--start 1:00 --end 2:00`, `--max-frames 40`, `--no-cache`, `--no-whisper`.

@@ -57,6 +57,10 @@ OPENAI_API_KEY=
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_VISION_MODEL=deepseek-v4-flash-vision-exp
+
+# Delete each downloaded video once its report is written (subtitles,
+# metadata and reports stay). Per-run override: --keep-video / --drop-video.
+WATCH_DROP_VIDEO=
 """
 
 

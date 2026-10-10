@@ -10,7 +10,9 @@ Usage:
 
   --cleanup     remove extracted frames once the report is written
   --drop-video  delete the downloaded video afterwards (keeps subtitles,
-                metadata and reports; also on via WATCH_DROP_VIDEO=1)
+                metadata and reports). Default when WATCH_DROP_VIDEO=1 is set
+                in the environment or ~/.config/watch/.env
+  --keep-video  keep the video for this run even if WATCH_DROP_VIDEO=1
 """
 from __future__ import annotations
 
@@ -406,6 +408,38 @@ def summarize_report(*, key: str, base: str, model: str, report: str, max_retrie
     return out
 
 
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+_HEADING_RE = re.compile(r"^(#{1,6})(\s+\S.*)$")
+
+
+def nest_headings(text: str, top: int = 3) -> str:
+    """Shift markdown headings so the shallowest becomes level `top`.
+
+    The model writes its own `# …` / `## …` headings; nested under our
+    `## [window]` / `## Summary` headings they must start at ###. Lines inside
+    fenced code blocks (e.g. a quoted CLAUDE.md) are left untouched.
+    """
+    lines = text.split("\n")
+    in_fence = False
+    levels = []
+    for line in lines:
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+        elif not in_fence and (m := _HEADING_RE.match(line)):
+            levels.append(len(m.group(1)))
+    if not levels or min(levels) >= top:
+        return text
+    shift = top - min(levels)
+    out, in_fence = [], False
+    for line in lines:
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+        elif not in_fence and (m := _HEADING_RE.match(line)):
+            line = "#" * min(6, len(m.group(1)) + shift) + m.group(2)
+        out.append(line)
+    return "\n".join(out)
+
+
 def append_report(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -420,7 +454,8 @@ def extra_has_range(extra: list[str]) -> bool:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     cleanup = False
-    drop_video = os.environ.get("WATCH_DROP_VIDEO", "") in ("1", "true", "yes")
+    keep_video = False
+    drop_video = load_var("WATCH_DROP_VIDEO").lower() in ("1", "true", "yes")
     kept: list[str] = []
     for i, a in enumerate(argv):
         if a == "--":
@@ -430,6 +465,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             cleanup = True
         elif a == "--drop-video":
             drop_video = True
+        elif a == "--keep-video":
+            keep_video = True
         else:
             kept.append(a)
 
@@ -453,7 +490,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     args = p.parse_args(kept)
     args.cleanup = cleanup
-    args.drop_video = drop_video
+    args.drop_video = drop_video and not keep_video  # --keep-video wins
     args.extra = extra
     return args
 
@@ -538,15 +575,22 @@ def main(argv: list[str] | None = None) -> int:
                 report_text=report,
                 max_retries=max_retries,
             )
+            body = nest_headings(body)
             section = f"## [{heading}]\n\n{body}\n"
             append_report(out_file, section)
             window_notes.append(f"## [{heading}]\n\n{body}")
 
         if len(windows) > 1:
             synth_prompt = (
-                "Synthesise the per-window notes below into a final ## Summary that answers:\n"
+                "Synthesise the per-window notes below into a concise summary of the whole "
+                "video that answers:\n"
                 f"{args.question}\n\n"
-                "Cite timestamps. Do not invent visuals that are not in the notes.\n\n"
+                "The per-window notes stay in the report in full, so do NOT restate them. "
+                "Hard limit: about 1,000 words. Structure: a short overview; the key moments "
+                "across the whole video, one line each with its [MM:SS] timestamp; the most "
+                "important code/commands named in one line each with the window they appear "
+                "in (no long verbatim blocks); takeaways. Cite timestamps. Do not invent "
+                "visuals that are not in the notes.\n\n"
                 + "\n\n".join(window_notes)
             )
             print("[watch-vision] writing summary across windows", file=sys.stderr)
@@ -557,7 +601,7 @@ def main(argv: list[str] | None = None) -> int:
                 messages=[{"role": "user", "content": synth_prompt}],
                 max_retries=max_retries,
             )
-            append_report(out_file, f"## Summary\n\n{summary}\n")
+            append_report(out_file, f"## Summary\n\n{nest_headings(summary)}\n")
 
         # Prepend YAML frontmatter now that the download (and its metadata)
         # exists, so reports can be indexed into a knowledge base later.

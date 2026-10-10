@@ -53,7 +53,8 @@ Or run the launcher directly:
 ./scripts/watch-video.sh "<url-or-path>" "your question" --cleanup --drop-video -- --resolution 1024 --start 1:00 --end 2:00
 ```
 - The launcher checks today's date first, so new downloads land in today's folder.
-- `--cleanup` removes the extracted frames; `--drop-video` deletes the downloaded video (or set `WATCH_DROP_VIDEO=1`). Subtitles, metadata and reports stay.
+- `--cleanup` removes the extracted frames; `--drop-video` deletes the downloaded video. Set `WATCH_DROP_VIDEO=1` in `~/.config/watch/.env` to make that the default on a machine, and `--keep-video` to keep one anyway. Subtitles, metadata and reports stay.
+- `video.info.json` is trimmed to the fields that matter (title, channel, dates, tags, description, chapters, …) — yt-dlp's full dump is ~10 MB of format and caption URLs on long videos.
 - Everything after `--` goes to `watch.py`. Pass `--resolution 1024` to read on-screen code accurately.
 - Transient errors (rate-limit / overload) are retried per request (`$WATCH_VISION_MAX_RETRIES`, default 2).
 
