@@ -26,7 +26,10 @@ The report now interleaves **frames and transcript lines in chronological order*
 Each video gets one folder: `~/Documents/claude-video-reports/<yyyy-mm-dd>/<video-id>/`, dated by the day it was first downloaded (override the root with `$WATCH_LIBRARY_DIR`). The video, subtitles, metadata and every report about it live together there. A video already in the library is **reused on later runs** (YouTube `?t=`, `?si=`, `/shorts/` and `youtu.be` links share one folder). A `.complete` sentinel prevents serving partial downloads, and library hits don't need `yt-dlp`. Force a fresh download with `--no-cache`; delete the video after the report with `--drop-video`.
 
 ### 4. Watch with **DeepSeek Vision** — `/watch-video` (`scripts/watch-video.sh`)
-`watch_vision.py` runs `watch.py`, sends the JPEGs plus the time-aligned transcript to DeepSeek's vision model as native image content, and writes `report.md` next to the video. Long videos are split into 10-minute windows with a final cross-window summary. Each report starts with YAML frontmatter (title, source, channel, duration, uploaded, watched, model, question, tags) so reports can be indexed later.
+`watch_vision.py` runs `watch.py`, sends the JPEGs plus the time-aligned transcript to DeepSeek's vision model as native image content, and writes `report.md` next to the video. Long videos are split into 10-minute windows with a final cross-window summary. Each report starts with YAML frontmatter (title, source, channel, duration, uploaded, watched, model, question, a 1–2 sentence summary, topics, tags).
+
+### 5. Recall across everything watched — `/watch:recall`
+After each run the library index `~/Documents/claude-video-reports/INDEX.md` is rebuilt from every report's frontmatter (one short entry per report, newest first; `scripts/library.py index` rebuilds it by hand). `/watch:recall <question>` has Haiku triage the index, greps the reports for literal terms (commands, names, quotes), then reads only the matching reports and answers with titles, timestamps and paths. No embeddings or local models.
 
 ---
 
@@ -87,11 +90,12 @@ Install on other surfaces, first-run setup, the frame-budget table, Whisper/Groq
 .
 ├── SKILL.md                     # upstream /watch skill (claude.ai / standalone)
 ├── skills/watch-video/SKILL.md  # /watch-video (plugin skill, NEW)
+├── skills/recall/SKILL.md       # /watch:recall over the library index (NEW)
 ├── commands/watch.md            # /watch
 ├── scripts/
 │   ├── watch.py                 # + scene-change, timeline, library wiring
 │   ├── download.py              # + dated library download
-│   ├── library.py               # dated folders, metadata, frontmatter (NEW)
+│   ├── library.py               # dated folders, metadata, frontmatter, INDEX.md (NEW)
 │   ├── frames.py                # + extract_scene_change()
 │   ├── transcribe.py
 │   ├── whisper.py

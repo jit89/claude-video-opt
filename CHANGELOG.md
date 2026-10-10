@@ -14,6 +14,8 @@ All notable changes to `/watch` are documented here.
 - SessionStart hook checks the venv's yt-dlp and the DeepSeek key, and stays silent when ready (it used to look for yt-dlp on PATH and nag about optional Whisper keys).
 
 ### Added
+- Library index `~/Documents/claude-video-reports/INDEX.md`, rebuilt from report frontmatter after every `/watch-video` run (`scripts/library.py index` by hand). Reports gain `summary` and `topics` fields from one extra short text call; a failed call never fails the run.
+- `/watch:recall <question>` skill: Haiku triages the index, grep finds literal terms, then only the matching reports are read.
 - Scene-change frame extraction in `scripts/frames.py` — `extract_scene_change()` uses ffmpeg's `select=gt(scene,0.3)` filter to emit one frame per detected shot instead of uniform every-N-seconds sampling, keeping token cost flat on long videos. Always emits frame 0 (the scene filter only fires on *changes*). Falls back to uniform sampling when fewer than 10 scenes are detected (static/screen-recorded sources). Adapted from [taoufik123-collab/claude-watch](https://github.com/taoufik123-collab/claude-watch) v0.2.0.
 - `--no-scene-change` flag on `scripts/watch.py` to force uniform sampling.
 

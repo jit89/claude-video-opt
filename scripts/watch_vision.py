@@ -236,8 +236,10 @@ def chat(
                 time.sleep(backoff)
                 continue
             raise SystemExit(f"DeepSeek vision failed: {last_err}") from exc
-        except urllib.error.URLError as exc:
-            last_err = str(exc.reason or exc)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            # TimeoutError: the socket timed out while reading the response
+            # body, which urlopen does not wrap in URLError.
+            last_err = str(getattr(exc, "reason", None) or exc or type(exc).__name__)
             if attempt < max_retries:
                 backoff = 10 * attempt
                 print(
@@ -348,6 +350,60 @@ def analyze_slice(
     if len(chunks) == 1:
         return chunks[0]
     return "\n\n".join(f"### Part {i}/{n}\n\n{c}" for i, c in enumerate(chunks, 1))
+
+
+SUMMARY_INPUT_CHARS = 60_000
+
+
+def _head_and_tail(text: str, limit: int) -> str:
+    """Trim to `limit` chars keeping the start and the end, where a windowed
+    report's cross-window ## Summary lives."""
+    if len(text) <= limit:
+        return text
+    head = limit // 3
+    return text[:head] + "\n\n[… middle of report omitted …]\n\n" + text[-(limit - head):]
+
+
+def summarize_report(*, key: str, base: str, model: str, report: str, max_retries: int) -> dict:
+    """One short text-only call: a 1–2 sentence summary plus topic keywords.
+
+    Feeds the library index. Never fails the run — on any error it returns {}
+    and the report simply goes into the index without a summary.
+    """
+    prompt = (
+        "Below is an analysis report of a video. Reply with JSON only, no prose, "
+        'in exactly this shape: {"summary": "<1-2 sentences: what the video is '
+        'about and its main takeaway>", "topics": ["<3-8 short topic keywords>"]}\n\n'
+        + _head_and_tail(report, SUMMARY_INPUT_CHARS)
+    )
+    try:
+        raw = chat(
+            key=key,
+            base=base,
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_retries=max_retries,
+        )
+    except SystemExit as exc:  # chat() reports failures via SystemExit
+        print(f"[watch-vision] summary skipped: {exc}", file=sys.stderr)
+        return {}
+    start, end = raw.find("{"), raw.rfind("}")
+    try:
+        data = json.loads(raw[start : end + 1], strict=False) if start != -1 and end > start else {}
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        return {}
+    summary = data.get("summary")
+    topics = data.get("topics")
+    out: dict = {}
+    if isinstance(summary, str) and summary.strip():
+        out["summary"] = " ".join(summary.split())
+    if isinstance(topics, list):
+        out["topics"] = [str(x).strip() for x in topics if str(x).strip()][:8]
+    if not out:
+        print("[watch-vision] summary skipped: unparseable reply", file=sys.stderr)
+    return out
 
 
 def append_report(path: Path, text: str) -> None:
@@ -506,6 +562,11 @@ def main(argv: list[str] | None = None) -> int:
         # Prepend YAML frontmatter now that the download (and its metadata)
         # exists, so reports can be indexed into a knowledge base later.
         meta = library.metadata(args.source)
+        body = out_file.read_text(encoding="utf-8")
+        print("[watch-vision] writing index summary", file=sys.stderr)
+        digest = summarize_report(
+            key=key, base=base, model=model, report=body, max_retries=max_retries
+        )
         fields = {
             "title": meta["title"],
             "source": meta["url"],
@@ -516,9 +577,10 @@ def main(argv: list[str] | None = None) -> int:
             "watched": os.environ["WATCH_DATE"],
             "model": model,
             "question": args.question,
+            "summary": digest.get("summary"),
+            "topics": digest.get("topics"),
             "tags": meta["tags"],
         }
-        body = out_file.read_text(encoding="utf-8")
         if meta["title"]:
             body = body.replace("# Watch report", f"# {meta['title']}", 1)
         out_file.write_text(library.frontmatter(fields) + body, encoding="utf-8")
@@ -527,6 +589,15 @@ def main(argv: list[str] | None = None) -> int:
             removed = library.drop_video(args.source)
             if removed:
                 print(f"[watch-vision] deleted video: {removed}", file=sys.stderr)
+
+        # Only reports inside the library are indexed; a WATCH_ANALYSIS_OUT
+        # elsewhere is left out (rebuild_index scans the library folders).
+        try:
+            index = library.rebuild_index()
+            if index:
+                print(f"[watch-vision] index updated: {index}", file=sys.stderr)
+        except Exception as exc:  # best-effort: the report itself is already written
+            print(f"[watch-vision] index not updated: {exc}", file=sys.stderr)
 
         print(str(out_file))
         return 0

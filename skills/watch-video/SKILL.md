@@ -104,7 +104,9 @@ Use `run_in_background: true`.
   is written next to it as `report.md` (`report-2.md`, … on re-runs). A video
   already in the library under an earlier date is reused from that folder.
 - Each report starts with YAML frontmatter (title, source, channel, duration,
-  uploaded, watched, model, question, tags) for indexing.
+  uploaded, watched, model, question, a 1–2 sentence summary, topics, tags),
+  and the run rebuilds the library index
+  (`~/Documents/claude-video-reports/INDEX.md`) that `/watch:recall` searches.
 - `--cleanup` removes the extracted frames once the report is written. Prefer
   it — you are never going to read those JPEGs.
 - `--drop-video` also deletes the downloaded video afterwards (subtitles,
