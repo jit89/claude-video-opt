@@ -235,10 +235,12 @@ def rebuild_index() -> Path | None:
                 "question": fm.get("question"),
                 "path": rel,
                 "complete": bool(fm),
+                "mtime": rp.stat().st_mtime,
             }
         )
-    # Newest first; path as a stable tie-breaker.
-    entries.sort(key=lambda e: (e["watched"], e["path"]), reverse=True)
+    # Newest first: by watched date, then by when the report was written
+    # (several videos share a day), then path as a stable tie-breaker.
+    entries.sort(key=lambda e: (e["watched"], e["mtime"], e["path"]), reverse=True)
 
     lines = [
         "# Video library index",
